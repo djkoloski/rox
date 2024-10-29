@@ -2,6 +2,7 @@
 
 #![deny(unsafe_op_in_unsafe_fn)]
 
+mod ast;
 mod scanner;
 
 use core::fmt;

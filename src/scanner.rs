@@ -71,7 +71,7 @@ impl<'a> Scanner<'a> {
         self.result.tokens.push(Token {
             kind: TokenKind::Eof,
             lexeme: String::new(),
-            literal: None,
+            value: None,
             line: self.line,
         });
     }
@@ -186,7 +186,7 @@ impl<'a> Scanner<'a> {
         self.advance();
 
         let value = self.source[self.start + 1..self.current - 1].to_string();
-        self.token(TokenKind::String, Some(Literal::String(value)));
+        self.token(TokenKind::String, Some(Value::String(value)));
     }
 
     fn number(&mut self) {
@@ -204,7 +204,7 @@ impl<'a> Scanner<'a> {
 
         match self.source[self.start..self.current].parse::<f64>() {
             Ok(value) => {
-                self.token(TokenKind::Number, Some(Literal::Number(value)))
+                self.token(TokenKind::Number, Some(Value::Number(value)))
             }
             Err(e) => self.error(ScanErrorKind::InvalidNumber(e)),
         }
@@ -281,11 +281,11 @@ impl<'a> Scanner<'a> {
         self.token(kind, None)
     }
 
-    fn token(&mut self, kind: TokenKind, literal: Option<Literal>) {
+    fn token(&mut self, kind: TokenKind, literal: Option<Value>) {
         self.result.tokens.push(Token {
             kind,
             lexeme: self.source[self.start..self.current].to_string(),
-            literal,
+            value: literal,
             line: self.line,
         });
     }
@@ -303,7 +303,7 @@ impl<'a> Scanner<'a> {
 }
 
 #[derive(Debug)]
-pub enum Literal {
+pub enum Value {
     String(String),
     Number(f64),
 }
@@ -312,7 +312,7 @@ pub enum Literal {
 pub struct Token {
     pub kind: TokenKind,
     pub lexeme: String,
-    pub literal: Option<Literal>,
+    pub value: Option<Value>,
     pub line: usize,
 }
 
