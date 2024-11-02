@@ -35,17 +35,12 @@ impl fmt::Display for ScanErrorKind {
     }
 }
 
-pub struct ScanResult {
-    pub tokens: Vec<Token>,
-    pub errors: Vec<ScanError>,
-}
-
 pub struct Scanner<'a> {
     source: &'a str,
     start: usize,
     current: usize,
     line: usize,
-    pub result: ScanResult,
+    pub errors: Vec<ScanError>,
 }
 
 impl<'a> Scanner<'a> {
@@ -55,29 +50,27 @@ impl<'a> Scanner<'a> {
             start: 0,
             current: 0,
             line: 1,
-            result: ScanResult {
-                tokens: Vec::new(),
-                errors: Vec::new(),
-            },
+            errors: Vec::new(),
         }
     }
 
-    pub fn scan_tokens(&mut self) {
-        while !self.is_at_end() {
+    pub fn scan_tokens(&mut self) -> Vec<Token> {
+        let mut result = Vec::new();
+
+        loop {
             self.start = self.current;
-            self.scan_token();
+            let Some(c) = self.advance() else { break };
+
+            if let Some(token) = self.scan_token(c) {
+                result.push(token);
+            }
         }
 
-        self.result.tokens.push(Token {
-            kind: TokenKind::Eof,
-            lexeme: String::new(),
-            value: None,
-            line: self.line,
-        });
+        result
     }
 
-    fn scan_token(&mut self) {
-        match self.advance() {
+    fn scan_token(&mut self, c: u8) -> Option<Token> {
+        Some(match c {
             b'(' => self.non_literal(TokenKind::LeftParen),
             b')' => self.non_literal(TokenKind::RightParen),
             b'{' => self.non_literal(TokenKind::LeftBrace),
@@ -90,51 +83,65 @@ impl<'a> Scanner<'a> {
             b'*' => self.non_literal(TokenKind::Star),
             b'!' => {
                 if self.expect(b'=') {
-                    self.non_literal(TokenKind::BangEqual);
+                    self.non_literal(TokenKind::BangEqual)
                 } else {
-                    self.non_literal(TokenKind::Bang);
+                    self.non_literal(TokenKind::Bang)
                 }
             }
             b'=' => {
                 if self.expect(b'=') {
-                    self.non_literal(TokenKind::EqualEqual);
+                    self.non_literal(TokenKind::EqualEqual)
                 } else {
-                    self.non_literal(TokenKind::Equal);
+                    self.non_literal(TokenKind::Equal)
                 }
             }
             b'<' => {
                 if self.expect(b'=') {
-                    self.non_literal(TokenKind::LessEqual);
+                    self.non_literal(TokenKind::LessEqual)
                 } else {
-                    self.non_literal(TokenKind::Less);
+                    self.non_literal(TokenKind::Less)
                 }
             }
             b'>' => {
                 if self.expect(b'=') {
-                    self.non_literal(TokenKind::GreaterEqual);
+                    self.non_literal(TokenKind::GreaterEqual)
                 } else {
-                    self.non_literal(TokenKind::Greater);
+                    self.non_literal(TokenKind::Greater)
                 }
             }
-            b'/' => match self.peek() {
-                b'/' => self.line_comment(),
-                b'*' => self.block_comment(),
+            b'/' => match self.peek()? {
+                b'/' => {
+                    self.line_comment();
+                    return None;
+                }
+                b'*' => {
+                    self.block_comment();
+                    return None;
+                }
                 _ => self.non_literal(TokenKind::Slash),
             },
-            b'"' => self.string(),
-            b'0'..=b'9' => self.number(),
+            b'"' => self.string()?,
+            b'0'..=b'9' => self.number()?,
             b'_' | b'a'..=b'z' | b'A'..=b'Z' => self.identifier(),
             // Whitespace
-            b' ' | b'\r' | b'\t' => (),
-            b'\n' => self.line += 1,
-            c => self.error(ScanErrorKind::UnexpectedCharacter(c)),
-        }
+            b' ' | b'\r' | b'\t' => return None,
+            b'\n' => {
+                self.line += 1;
+                return None;
+            }
+            c => {
+                self.error(ScanErrorKind::UnexpectedCharacter(c));
+                return None;
+            }
+        })
     }
 
     fn line_comment(&mut self) {
         self.advance();
-        while self.peek() != b'\n' && !self.is_at_end() {
-            self.advance();
+        while let Some(next) = self.peek() {
+            if next != b'\n' {
+                self.advance();
+            }
         }
     }
 
@@ -142,85 +149,92 @@ impl<'a> Scanner<'a> {
         let mut depth = 1;
 
         self.advance();
-        loop {
-            match self.advance() {
-                b'\0' => {
-                    self.error(ScanErrorKind::UnterminatedBlockComment);
-                    break;
-                }
+        while let Some(c) = self.advance() {
+            match c {
                 b'/' => {
-                    if self.peek() == b'*' {
+                    if self.peek() == Some(b'*') {
                         self.advance();
                         depth += 1;
                     }
                 }
                 b'*' => {
-                    if self.peek() == b'/' {
+                    if self.peek() == Some(b'/') {
                         self.advance();
                         depth -= 1;
                         if depth == 0 {
-                            break;
+                            return;
                         }
                     }
                 }
                 _ => (),
             }
         }
+
+        self.error(ScanErrorKind::UnterminatedBlockComment);
     }
 
-    fn string(&mut self) {
-        loop {
-            match self.peek() {
-                b'"' => break,
-                b'\n' => self.line += 1,
-                b'\0' => {
-                    self.error(ScanErrorKind::UnterminatedString);
-                    break;
+    fn string(&mut self) -> Option<Token> {
+        while let Some(c) = self.peek() {
+            match c {
+                b'"' => {
+                    // closing quote
+                    self.advance();
+
+                    let value = self.source[self.start + 1..self.current - 1]
+                        .to_string();
+                    return Some(
+                        self.token(
+                            TokenKind::String,
+                            Some(Value::String(value)),
+                        ),
+                    );
                 }
+                b'\n' => self.line += 1,
                 _ => (),
             }
             self.advance();
         }
 
-        // closing quote
-        self.advance();
-
-        let value = self.source[self.start + 1..self.current - 1].to_string();
-        self.token(TokenKind::String, Some(Value::String(value)));
+        self.error(ScanErrorKind::UnterminatedString);
+        None
     }
 
-    fn number(&mut self) {
-        while self.peek().is_ascii_digit() {
+    fn number(&mut self) -> Option<Token> {
+        while self.peek().is_some_and(|c| c.is_ascii_digit()) {
             self.advance();
         }
 
-        if self.peek() == b'.' && self.peek_next().is_ascii_digit() {
+        if self.peek() == Some(b'.')
+            && self.peek_next().is_some_and(|c| c.is_ascii_digit())
+        {
             self.advance();
 
-            while self.peek().is_ascii_digit() {
+            while self.peek().is_some_and(|c| c.is_ascii_digit()) {
                 self.advance();
             }
         }
 
         match self.source[self.start..self.current].parse::<f64>() {
             Ok(value) => {
-                self.token(TokenKind::Number, Some(Value::Number(value)))
+                Some(self.token(TokenKind::Number, Some(Value::Number(value))))
             }
-            Err(e) => self.error(ScanErrorKind::InvalidNumber(e)),
+            Err(e) => {
+                println!(
+                    "attempted to parse {}..{} (`{}`) as a float",
+                    self.start,
+                    self.current,
+                    &self.source[self.start..self.current]
+                );
+                self.error(ScanErrorKind::InvalidNumber(e));
+                None
+            }
         }
     }
 
-    fn identifier(&mut self) {
-        loop {
-            let is_alphanumeric = matches!(
-                self.peek(),
-                b'_' | b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9',
-            );
-
-            if !is_alphanumeric {
-                break;
-            }
-
+    fn identifier(&mut self) -> Token {
+        while self.peek().is_some_and(
+            |c| matches!(c, b'_' | b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9'),
+        ) {
             self.advance();
         }
 
@@ -242,26 +256,18 @@ impl<'a> Scanner<'a> {
             "var" => TokenKind::Var,
             "while" => TokenKind::While,
             _ => TokenKind::Identifier,
-        });
+        })
     }
 
-    fn peek(&self) -> u8 {
-        self.source
-            .as_bytes()
-            .get(self.current)
-            .cloned()
-            .unwrap_or(b'\0')
+    fn peek(&self) -> Option<u8> {
+        self.source.as_bytes().get(self.current).cloned()
     }
 
-    fn peek_next(&self) -> u8 {
-        self.source
-            .as_bytes()
-            .get(self.current + 1)
-            .cloned()
-            .unwrap_or(b'\0')
+    fn peek_next(&self) -> Option<u8> {
+        self.source.as_bytes().get(self.current + 1).cloned()
     }
 
-    fn advance(&mut self) -> u8 {
+    fn advance(&mut self) -> Option<u8> {
         let c = self.peek();
         self.current += 1;
         c
@@ -269,7 +275,7 @@ impl<'a> Scanner<'a> {
 
     fn expect(&mut self, next: u8) -> bool {
         let c = self.peek();
-        if c == next {
+        if c == Some(next) {
             self.advance();
             true
         } else {
@@ -277,28 +283,24 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    fn non_literal(&mut self, kind: TokenKind) {
+    fn non_literal(&mut self, kind: TokenKind) -> Token {
         self.token(kind, None)
     }
 
-    fn token(&mut self, kind: TokenKind, literal: Option<Value>) {
-        self.result.tokens.push(Token {
+    fn token(&mut self, kind: TokenKind, literal: Option<Value>) -> Token {
+        Token {
             kind,
             lexeme: self.source[self.start..self.current].to_string(),
             value: literal,
             line: self.line,
-        });
+        }
     }
 
     fn error(&mut self, kind: ScanErrorKind) {
-        self.result.errors.push(ScanError {
+        self.errors.push(ScanError {
             kind,
             line: self.line,
         });
-    }
-
-    fn is_at_end(&self) -> bool {
-        self.current >= self.source.as_bytes().len()
     }
 }
 
@@ -316,7 +318,7 @@ pub struct Token {
     pub line: usize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum TokenKind {
     LeftParen,
     RightParen,
@@ -356,5 +358,4 @@ pub enum TokenKind {
     True,
     Var,
     While,
-    Eof,
 }

@@ -3,6 +3,7 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 mod ast;
+mod parser;
 mod scanner;
 
 use core::fmt;
@@ -14,7 +15,11 @@ use std::{
     process::exit,
 };
 
-use crate::scanner::Scanner;
+use crate::{
+    ast::{AstPrinter, Visit},
+    parser::Parser,
+    scanner::Scanner,
+};
 
 fn main() -> Result<()> {
     let mut rox = Rox::new();
@@ -69,17 +74,22 @@ impl Rox {
 
     pub fn run(&mut self, source: &str) {
         let mut scanner = Scanner::new(source);
-        scanner.scan_tokens();
+        let tokens = scanner.scan_tokens();
 
-        if !scanner.result.errors.is_empty() {
+        if !scanner.errors.is_empty() {
             self.had_error = true;
-            for error in scanner.result.errors {
+            for error in scanner.errors {
                 self.error(error.line, &error.kind);
             }
         }
 
-        for token in scanner.result.tokens {
-            println!("{:?}", token);
+        let mut parser = Parser::new(tokens);
+        if let Some(ast) = parser.parse() {
+            println!("{}", ast.accept(&AstPrinter));
+        } else {
+            for error in parser.errors {
+                self.error(error.line, &error.kind);
+            }
         }
     }
 
