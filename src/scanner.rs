@@ -1,26 +1,16 @@
 use core::{fmt, num::ParseFloatError};
 
-#[derive(Debug)]
-pub struct ScanError {
-    pub kind: ScanErrorKind,
-    pub line: usize,
-}
-
-impl fmt::Display for ScanError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "on line {}:\n{}", self.line, self.kind)
-    }
-}
+use crate::span::{Span, Spanned};
 
 #[derive(Debug)]
-pub enum ScanErrorKind {
+pub enum ScanError {
     UnexpectedCharacter(u8),
     UnterminatedBlockComment,
     UnterminatedString,
     InvalidNumber(ParseFloatError),
 }
 
-impl fmt::Display for ScanErrorKind {
+impl fmt::Display for ScanError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnexpectedCharacter(c) => {
@@ -40,7 +30,7 @@ pub struct Scanner<'a> {
     start: usize,
     current: usize,
     line: usize,
-    pub errors: Vec<ScanError>,
+    pub errors: Vec<Spanned<ScanError>>,
 }
 
 impl<'a> Scanner<'a> {
@@ -71,42 +61,42 @@ impl<'a> Scanner<'a> {
 
     fn scan_token(&mut self, c: u8) -> Option<Token> {
         Some(match c {
-            b'(' => self.non_literal(TokenKind::LeftParen),
-            b')' => self.non_literal(TokenKind::RightParen),
-            b'{' => self.non_literal(TokenKind::LeftBrace),
-            b'}' => self.non_literal(TokenKind::RightBrace),
-            b',' => self.non_literal(TokenKind::Comma),
-            b'.' => self.non_literal(TokenKind::Dot),
-            b'-' => self.non_literal(TokenKind::Minus),
-            b'+' => self.non_literal(TokenKind::Plus),
-            b';' => self.non_literal(TokenKind::Semicolon),
-            b'*' => self.non_literal(TokenKind::Star),
+            b'(' => self.token(TokenKind::LeftParen),
+            b')' => self.token(TokenKind::RightParen),
+            b'{' => self.token(TokenKind::LeftBrace),
+            b'}' => self.token(TokenKind::RightBrace),
+            b',' => self.token(TokenKind::Comma),
+            b'.' => self.token(TokenKind::Dot),
+            b'-' => self.token(TokenKind::Minus),
+            b'+' => self.token(TokenKind::Plus),
+            b';' => self.token(TokenKind::Semicolon),
+            b'*' => self.token(TokenKind::Star),
             b'!' => {
                 if self.expect(b'=') {
-                    self.non_literal(TokenKind::BangEqual)
+                    self.token(TokenKind::BangEqual)
                 } else {
-                    self.non_literal(TokenKind::Bang)
+                    self.token(TokenKind::Bang)
                 }
             }
             b'=' => {
                 if self.expect(b'=') {
-                    self.non_literal(TokenKind::EqualEqual)
+                    self.token(TokenKind::EqualEqual)
                 } else {
-                    self.non_literal(TokenKind::Equal)
+                    self.token(TokenKind::Equal)
                 }
             }
             b'<' => {
                 if self.expect(b'=') {
-                    self.non_literal(TokenKind::LessEqual)
+                    self.token(TokenKind::LessEqual)
                 } else {
-                    self.non_literal(TokenKind::Less)
+                    self.token(TokenKind::Less)
                 }
             }
             b'>' => {
                 if self.expect(b'=') {
-                    self.non_literal(TokenKind::GreaterEqual)
+                    self.token(TokenKind::GreaterEqual)
                 } else {
-                    self.non_literal(TokenKind::Greater)
+                    self.token(TokenKind::Greater)
                 }
             }
             b'/' => match self.peek()? {
@@ -118,7 +108,7 @@ impl<'a> Scanner<'a> {
                     self.block_comment();
                     return None;
                 }
-                _ => self.non_literal(TokenKind::Slash),
+                _ => self.token(TokenKind::Slash),
             },
             b'"' => self.string()?,
             b'0'..=b'9' => self.number()?,
@@ -130,7 +120,7 @@ impl<'a> Scanner<'a> {
                 return None;
             }
             c => {
-                self.error(ScanErrorKind::UnexpectedCharacter(c));
+                self.error(ScanError::UnexpectedCharacter(c));
                 return None;
             }
         })
@@ -170,7 +160,7 @@ impl<'a> Scanner<'a> {
             }
         }
 
-        self.error(ScanErrorKind::UnterminatedBlockComment);
+        self.error(ScanError::UnterminatedBlockComment);
     }
 
     fn string(&mut self) -> Option<Token> {
@@ -182,12 +172,7 @@ impl<'a> Scanner<'a> {
 
                     let value = self.source[self.start + 1..self.current - 1]
                         .to_string();
-                    return Some(
-                        self.token(
-                            TokenKind::String,
-                            Some(Value::String(value)),
-                        ),
-                    );
+                    return Some(self.token(TokenKind::String(value)));
                 }
                 b'\n' => self.line += 1,
                 _ => (),
@@ -195,7 +180,7 @@ impl<'a> Scanner<'a> {
             self.advance();
         }
 
-        self.error(ScanErrorKind::UnterminatedString);
+        self.error(ScanError::UnterminatedString);
         None
     }
 
@@ -215,9 +200,7 @@ impl<'a> Scanner<'a> {
         }
 
         match self.source[self.start..self.current].parse::<f64>() {
-            Ok(value) => {
-                Some(self.token(TokenKind::Number, Some(Value::Number(value))))
-            }
+            Ok(value) => Some(self.token(TokenKind::Number(value))),
             Err(e) => {
                 println!(
                     "attempted to parse {}..{} (`{}`) as a float",
@@ -225,7 +208,7 @@ impl<'a> Scanner<'a> {
                     self.current,
                     &self.source[self.start..self.current]
                 );
-                self.error(ScanErrorKind::InvalidNumber(e));
+                self.error(ScanError::InvalidNumber(e));
                 None
             }
         }
@@ -238,7 +221,7 @@ impl<'a> Scanner<'a> {
             self.advance();
         }
 
-        self.non_literal(match &self.source[self.start..self.current] {
+        self.token(match &self.source[self.start..self.current] {
             "and" => TokenKind::And,
             "class" => TokenKind::Class,
             "else" => TokenKind::Else,
@@ -283,42 +266,30 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    fn non_literal(&mut self, kind: TokenKind) -> Token {
-        self.token(kind, None)
-    }
-
-    fn token(&mut self, kind: TokenKind, literal: Option<Value>) -> Token {
+    fn token(&mut self, kind: TokenKind) -> Token {
         Token {
             kind,
             lexeme: self.source[self.start..self.current].to_string(),
-            value: literal,
-            line: self.line,
+            span: Span::for_line(self.line),
         }
     }
 
-    fn error(&mut self, kind: ScanErrorKind) {
-        self.errors.push(ScanError {
-            kind,
-            line: self.line,
+    fn error(&mut self, error: ScanError) {
+        self.errors.push(Spanned {
+            inner: error,
+            span: Span::for_line(self.line),
         });
     }
-}
-
-#[derive(Debug)]
-pub enum Value {
-    String(String),
-    Number(f64),
 }
 
 #[derive(Debug)]
 pub struct Token {
     pub kind: TokenKind,
     pub lexeme: String,
-    pub value: Option<Value>,
-    pub line: usize,
+    pub span: Span,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub enum TokenKind {
     LeftParen,
     RightParen,
@@ -340,8 +311,8 @@ pub enum TokenKind {
     Less,
     LessEqual,
     Identifier,
-    String,
-    Number,
+    String(String),
+    Number(f64),
     And,
     Class,
     Else,

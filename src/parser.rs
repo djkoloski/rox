@@ -3,28 +3,17 @@ use core::fmt;
 use crate::{
     ast::{BinaryExpr, Expr, GroupingExpr, LiteralExpr, UnaryExpr},
     scanner::{Token, TokenKind},
+    span::{Span, Spanned},
 };
 
 #[derive(Debug)]
-pub struct ParseError {
-    pub kind: ParseErrorKind,
-    pub line: usize,
-}
-
-impl fmt::Display for ParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "on line {}:\n{}", self.line, self.kind)
-    }
-}
-
-#[derive(Debug)]
-pub enum ParseErrorKind {
+pub enum ParseError {
     ExpectedExpression(TokenKind),
     UnterminatedGroup,
     EofDuringExpression,
 }
 
-impl fmt::Display for ParseErrorKind {
+impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ExpectedExpression(kind) => {
@@ -42,7 +31,7 @@ impl fmt::Display for ParseErrorKind {
 
 pub struct Parser {
     tokens: Vec<Token>,
-    pub errors: Vec<ParseError>,
+    pub errors: Vec<Spanned<ParseError>>,
 }
 
 impl Parser {
@@ -124,8 +113,8 @@ impl Parser {
             Some(
                 token @ Token {
                     kind:
-                        TokenKind::Number
-                        | TokenKind::String
+                        TokenKind::Number(_)
+                        | TokenKind::String(_)
                         | TokenKind::True
                         | TokenKind::False
                         | TokenKind::Nil,
@@ -157,9 +146,9 @@ impl Parser {
                         rparen,
                     })),
                     Some(token) => {
-                        self.errors.push(ParseError {
-                            kind: ParseErrorKind::UnterminatedGroup,
-                            line: token.line,
+                        self.errors.push(Spanned {
+                            inner: ParseError::UnterminatedGroup,
+                            span: token.span,
                         });
 
                         self.synchronize(|kind| {
@@ -169,25 +158,25 @@ impl Parser {
                         None
                     }
                     None => {
-                        self.errors.push(ParseError {
-                            kind: ParseErrorKind::EofDuringExpression,
-                            line: usize::MAX,
+                        self.errors.push(Spanned {
+                            inner: ParseError::EofDuringExpression,
+                            span: Span::eof(),
                         });
                         None
                     }
                 }
             }
             Some(token) => {
-                self.errors.push(ParseError {
-                    kind: ParseErrorKind::ExpectedExpression(token.kind),
-                    line: token.line,
+                self.errors.push(Spanned {
+                    inner: ParseError::ExpectedExpression(token.kind),
+                    span: token.span,
                 });
                 None
             }
             None => {
-                self.errors.push(ParseError {
-                    kind: ParseErrorKind::EofDuringExpression,
-                    line: usize::MAX,
+                self.errors.push(Spanned {
+                    inner: ParseError::EofDuringExpression,
+                    span: Span::eof(),
                 });
                 None
             }
