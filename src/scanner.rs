@@ -29,7 +29,6 @@ pub struct Scanner<'a> {
     source: &'a str,
     start: usize,
     current: usize,
-    line: usize,
     pub errors: Vec<Spanned<ScanError>>,
 }
 
@@ -39,7 +38,6 @@ impl<'a> Scanner<'a> {
             source,
             start: 0,
             current: 0,
-            line: 1,
             errors: Vec::new(),
         }
     }
@@ -114,11 +112,7 @@ impl<'a> Scanner<'a> {
             b'0'..=b'9' => self.number()?,
             b'_' | b'a'..=b'z' | b'A'..=b'Z' => self.identifier(),
             // Whitespace
-            b' ' | b'\r' | b'\t' => return None,
-            b'\n' => {
-                self.line += 1;
-                return None;
-            }
+            b' ' | b'\r' | b'\t' | b'\n' => return None,
             c => {
                 self.error(ScanError::UnexpectedCharacter(c));
                 return None;
@@ -174,7 +168,6 @@ impl<'a> Scanner<'a> {
                         .to_string();
                     return Some(self.token(TokenKind::String(value)));
                 }
-                b'\n' => self.line += 1,
                 _ => (),
             }
             self.advance();
@@ -269,15 +262,14 @@ impl<'a> Scanner<'a> {
     fn token(&mut self, kind: TokenKind) -> Token {
         Token {
             kind,
-            lexeme: self.source[self.start..self.current].to_string(),
-            span: Span::for_line(self.line),
+            span: Span::new(self.start, self.current),
         }
     }
 
     fn error(&mut self, error: ScanError) {
         self.errors.push(Spanned {
             inner: error,
-            span: Span::for_line(self.line),
+            span: Span::new(self.start, self.current),
         });
     }
 }
@@ -285,7 +277,6 @@ impl<'a> Scanner<'a> {
 #[derive(Debug)]
 pub struct Token {
     pub kind: TokenKind,
-    pub lexeme: String,
     pub span: Span,
 }
 

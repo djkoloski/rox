@@ -23,15 +23,13 @@ use crate::{
 };
 
 fn main() -> Result<(), Error> {
-    let mut rox = Rox::new();
-
     let mut args = args_os();
     let status = match args.len() {
         1 => {
-            rox.run_prompt()?;
+            run_prompt()?;
             Status::Ok
         }
-        2 => rox.run_file(Path::new(&args.nth(1).unwrap()))?,
+        2 => run_file(Path::new(&args.nth(1).unwrap()))?,
         _ => {
             eprintln!("Usage: rox [script]");
             Status::CompilerError
@@ -47,38 +45,44 @@ pub enum Status {
     RuntimeError = 65,
 }
 
-pub struct Rox {}
+pub fn run_file(path: &Path) -> Result<Status, Error> {
+    let source = fs::read_to_string(path)?;
+    let mut rox = Rox::new(&source);
+    Ok(rox.run())
+}
 
-impl Rox {
-    pub fn new() -> Self {
-        Self {}
-    }
+pub fn run_prompt() -> Result<(), Error> {
+    loop {
+        print!("> ");
+        stdout().flush()?;
 
-    pub fn run_file(&mut self, path: &Path) -> Result<Status, Error> {
-        let source = fs::read_to_string(path)?;
-        Ok(self.run(&source))
-    }
-
-    pub fn run_prompt(&mut self) -> Result<(), Error> {
-        loop {
-            print!("> ");
-            stdout().flush()?;
-
-            let mut line = String::new();
-            let eof = stdin().read_line(&mut line)? == 0;
-            if eof || line.contains('\u{4}') {
-                break;
-            }
-            self.run(&line);
+        let mut line = String::new();
+        let eof = stdin().read_line(&mut line)? == 0;
+        if eof || line.contains('\u{4}') {
+            break;
         }
-
-        Ok(())
+        let mut rox = Rox::new(&line);
+        rox.run();
     }
 
-    pub fn run(&mut self, source: &str) -> Status {
+    Ok(())
+}
+
+pub struct Rox<'t> {
+    source: &'t str,
+}
+
+impl<'t> Rox<'t> {
+    pub fn new(source: &'t str) -> Self {
+        Self {
+            source,
+        }
+    }
+
+    pub fn run(&mut self) -> Status {
         let mut status = Status::Ok;
 
-        let mut scanner = Scanner::new(source);
+        let mut scanner = Scanner::new(self.source);
         let tokens = scanner.scan_tokens();
 
         if !scanner.errors.is_empty() {
@@ -118,12 +122,7 @@ impl Rox {
     }
 
     fn error<E: fmt::Display>(&mut self, spanned: &Spanned<E>) {
-        eprintln!("[{}] Error: {}", spanned.span, spanned.inner);
-    }
-}
-
-impl Default for Rox {
-    fn default() -> Self {
-        Self::new()
+        println!("error: {}", spanned.inner);
+        spanned.span.indicate(self.source);
     }
 }

@@ -2,28 +2,30 @@ use core::fmt;
 
 use crate::{
     ast::{
-        BinaryExpr, GroupingExpr, LiteralExpr, UnaryExpr, Visit as _, Visitor,
+        BinaryExpr, GroupingExpr, LiteralExpr, SpanExt as _, Spanner, UnaryExpr, Visit, Visitor
     },
     scanner::TokenKind,
-    span::{Span, Spanned},
+    span::Spanned,
 };
 
 #[derive(Debug)]
 pub enum InterpretError {
     #[allow(dead_code)]
-    ExpectedBoolean,
-    ExpectedNumber,
-    ExpectedNumberOrString,
+    ExpectedBoolean(Value),
+    ExpectedNumber(Value),
+    ExpectedString(Value),
+    ExpectedNumberOrString(Value),
     DivideByZero,
 }
 
 impl fmt::Display for InterpretError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ExpectedBoolean => write!(f, "expected a boolean"),
-            Self::ExpectedNumber => write!(f, "expected a number"),
-            Self::ExpectedNumberOrString => {
-                write!(f, "expected a number or a string")
+            Self::ExpectedBoolean(v) => write!(f, "expected a boolean, found {v:?}"),
+            Self::ExpectedNumber(v) => write!(f, "expected a number, found {v:?}"),
+            Self::ExpectedString(v) => write!(f, "expected a string, found {v:?}"),
+            Self::ExpectedNumberOrString(v) => {
+                write!(f, "expected a number or a string, found {v:?}")
             }
             Self::DivideByZero => write!(f, "attempted to divide by zero"),
         }
@@ -64,38 +66,51 @@ impl Value {
             Self::Number(_) | Self::String(_) => true,
         }
     }
-
-    #[allow(dead_code)]
-    pub fn expect_bool(
-        self,
-        span: Span,
-    ) -> Result<bool, Spanned<InterpretError>> {
-        if let Value::Bool(b) = self {
-            Ok(b)
-        } else {
-            Err(Spanned {
-                inner: InterpretError::ExpectedBoolean,
-                span,
-            })
-        }
-    }
-
-    pub fn expect_number(
-        self,
-        span: Span,
-    ) -> Result<f64, Spanned<InterpretError>> {
-        if let Value::Number(n) = self {
-            Ok(n)
-        } else {
-            Err(Spanned {
-                inner: InterpretError::ExpectedNumber,
-                span,
-            })
-        }
-    }
 }
 
 pub struct Interpreter;
+
+impl Interpreter {
+    fn eval<V>(&mut self, v: &V) -> Result<Value, Spanned<InterpretError>>
+    where
+        V: Visit<Self>,
+    {
+        v.accept(self)
+    }
+
+    fn eval_number<V>(
+        &mut self,
+        v: &V,
+    ) -> Result<f64, Spanned<InterpretError>>
+    where
+        V: Visit<Self> + Visit<Spanner>,
+    {
+        match self.eval(v)? {
+            Value::Number(n) => Ok(n),
+            value => Err(Spanned {
+                inner: InterpretError::ExpectedNumber(value),
+                span: v.span(),
+            }),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn eval_boolean<V>(
+        &mut self,
+        v: &V,
+    ) -> Result<bool, Spanned<InterpretError>>
+    where
+        V: Visit<Self> + Visit<Spanner>,
+    {
+        match self.eval(v)? {
+            Value::Bool(b) => Ok(b),
+            value => Err(Spanned {
+                inner: InterpretError::ExpectedBoolean(value),
+                span: v.span(),
+            }),
+        }
+    }
+}
 
 impl Visitor for Interpreter {
     type Output = Result<Value, Spanned<InterpretError>>;
@@ -112,65 +127,70 @@ impl Visitor for Interpreter {
     }
 
     fn visit_unary_expr(&mut self, unary: &UnaryExpr) -> Self::Output {
-        let value = unary.expr.accept(self)?;
-        let span = unary.operator.span;
-
         Ok(match unary.operator.kind {
-            TokenKind::Bang => Value::Bool(!value.truthiness()),
-            TokenKind::Minus => Value::Number(-value.expect_number(span)?),
+            TokenKind::Bang => Value::Bool(!self.eval(&unary.expr)?.truthiness()),
+            TokenKind::Minus => Value::Number(-self.eval_number(&unary.expr)?),
             _ => unreachable!(),
         })
     }
 
     fn visit_binary_expr(&mut self, binary: &BinaryExpr) -> Self::Output {
-        let left = binary.left.accept(self)?;
-        let right = binary.right.accept(self)?;
-        let span = binary.operator.span;
-
         Ok(match binary.operator.kind {
             TokenKind::Minus => Value::Number(
-                left.expect_number(span)? - right.expect_number(span)?,
+                self.eval_number(&binary.left)? - self.eval_number(&binary.right)?,
             ),
             TokenKind::Star => Value::Number(
-                left.expect_number(span)? * right.expect_number(span)?,
+                self.eval_number(&binary.left)? * self.eval_number(&binary.right)?,
             ),
             TokenKind::Slash => {
-                let num = left.expect_number(span)?;
-                let den = right.expect_number(span)?;
+                let num = self.eval_number(&binary.left)?;
+                let den = self.eval_number(&binary.right)?;
                 if den == 0.0 {
                     return Err(Spanned {
                         inner: InterpretError::DivideByZero,
-                        span,
+                        span: binary.right.span(),
                     });
                 }
                 Value::Number(num / den)
             }
-            TokenKind::Plus => match (left, right) {
+            TokenKind::Plus => match (self.eval(&binary.left)?, self.eval(&binary.right)?) {
                 (Value::Number(l), Value::Number(r)) => Value::Number(l + r),
                 (Value::String(l), Value::String(r)) => {
                     Value::String(format!("{l}{r}"))
                 }
-                _ => {
+                (Value::Number(_), r) => {
                     return Err(Spanned {
-                        inner: InterpretError::ExpectedNumberOrString,
-                        span,
-                    })
+                        inner: InterpretError::ExpectedNumber(r),
+                        span: binary.right.span(),
+                    });
+                }
+                (Value::String(_), r) => {
+                    return Err(Spanned {
+                        inner: InterpretError::ExpectedString(r),
+                        span: binary.right.span(),
+                    });
+                }
+                (l, _) => {
+                    return Err(Spanned {
+                        inner: InterpretError::ExpectedNumberOrString(l),
+                        span: binary.left.span(),
+                    });
                 }
             },
             TokenKind::Greater => Value::Bool(
-                left.expect_number(span)? > right.expect_number(span)?,
+                self.eval_number(&binary.left)? > self.eval_number(&binary.right)?,
             ),
             TokenKind::GreaterEqual => Value::Bool(
-                left.expect_number(span)? >= right.expect_number(span)?,
+                self.eval_number(&binary.left)? >= self.eval_number(&binary.right)?,
             ),
             TokenKind::Less => Value::Bool(
-                left.expect_number(span)? < right.expect_number(span)?,
+                self.eval_number(&binary.left)? < self.eval_number(&binary.right)?,
             ),
             TokenKind::LessEqual => Value::Bool(
-                left.expect_number(span)? <= right.expect_number(span)?,
+                self.eval_number(&binary.left)? <= self.eval_number(&binary.right)?,
             ),
-            TokenKind::EqualEqual => Value::Bool(left == right),
-            TokenKind::BangEqual => Value::Bool(left != right),
+            TokenKind::EqualEqual => Value::Bool(self.eval(&binary.left)? == self.eval(&binary.right)?),
+            TokenKind::BangEqual => Value::Bool(self.eval(&binary.left)? != self.eval(&binary.right)?),
             _ => unreachable!(),
         })
     }
