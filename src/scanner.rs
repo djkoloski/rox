@@ -1,27 +1,67 @@
 use core::{fmt, num::ParseFloatError};
 
-use crate::span::{Span, Spanned};
+use crate::{
+    diagnostic::{Context, Diagnostic},
+    span::Span,
+};
 
 #[derive(Debug)]
 pub enum ScanError {
-    UnexpectedCharacter(u8),
-    UnterminatedBlockComment,
-    UnterminatedString,
-    InvalidNumber(ParseFloatError),
+    UnexpectedCharacter { span: Span, char: u8 },
+    UnterminatedBlockComment(Span),
+    UnterminatedString(Span),
+    InvalidNumber { span: Span, error: ParseFloatError },
 }
 
-impl fmt::Display for ScanError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Diagnostic for ScanError {
+    fn fmt(
+        &self,
+        c: &mut Context<'_>,
+        f: &mut fmt::Formatter<'_>,
+    ) -> fmt::Result {
         match self {
-            Self::UnexpectedCharacter(c) => {
-                write!(f, "unexpected character: {}", *c as char)
+            Self::UnexpectedCharacter { span, char } => {
+                c.error(f, format_args!("unexpected character"))?;
+                c.span(
+                    *span,
+                    f,
+                    format_args!(
+                        "'{}' (0x{char:x}) is not valid syntax",
+                        *char as char
+                    ),
+                )?;
             }
-            Self::UnterminatedBlockComment => {
-                write!(f, "unterminated block comment")
+            Self::UnterminatedBlockComment(span) => {
+                c.error(f, format_args!("unterminated block comment"))?;
+                c.span(
+                    *span,
+                    f,
+                    format_args!(
+                        "this block comment is missing a closing tag (*/)"
+                    ),
+                )?;
             }
-            Self::UnterminatedString => write!(f, "unterminated string"),
-            Self::InvalidNumber(e) => write!(f, "invalid number: {e}"),
+            Self::UnterminatedString(span) => {
+                c.error(f, format_args!("unterminated string"))?;
+                c.span(
+                    *span,
+                    f,
+                    format_args!("this string is missing a closing quote (\")"),
+                )?;
+            }
+            Self::InvalidNumber { span, error } => {
+                c.error(f, format_args!("invalid number"))?;
+                c.span(
+                    *span,
+                    f,
+                    format_args!(
+                        "failed to parse '{}' as a number: {error}",
+                        span.get(c.source())
+                    ),
+                )?;
+            }
         }
+        Ok(())
     }
 }
 
@@ -29,7 +69,7 @@ pub struct Scanner<'a> {
     source: &'a str,
     start: usize,
     current: usize,
-    pub errors: Vec<Spanned<ScanError>>,
+    pub errors: Vec<ScanError>,
 }
 
 impl<'a> Scanner<'a> {
@@ -113,8 +153,11 @@ impl<'a> Scanner<'a> {
             b'_' | b'a'..=b'z' | b'A'..=b'Z' => self.identifier(),
             // Whitespace
             b' ' | b'\r' | b'\t' | b'\n' => return None,
-            c => {
-                self.error(ScanError::UnexpectedCharacter(c));
+            char => {
+                self.error(ScanError::UnexpectedCharacter {
+                    span: self.span(),
+                    char,
+                });
                 return None;
             }
         })
@@ -154,26 +197,19 @@ impl<'a> Scanner<'a> {
             }
         }
 
-        self.error(ScanError::UnterminatedBlockComment);
+        self.error(ScanError::UnterminatedBlockComment(self.span()));
     }
 
     fn string(&mut self) -> Option<Token> {
-        while let Some(c) = self.peek() {
-            match c {
-                b'"' => {
-                    // closing quote
-                    self.advance();
-
-                    let value = self.source[self.start + 1..self.current - 1]
-                        .to_string();
-                    return Some(self.token(TokenKind::String(value)));
-                }
-                _ => (),
+        while let Some(c) = self.advance() {
+            if c == b'"' {
+                let value =
+                    self.source[self.start + 1..self.current - 1].to_string();
+                return Some(self.token(TokenKind::String(value)));
             }
-            self.advance();
         }
 
-        self.error(ScanError::UnterminatedString);
+        self.error(ScanError::UnterminatedString(self.span()));
         None
     }
 
@@ -194,14 +230,17 @@ impl<'a> Scanner<'a> {
 
         match self.source[self.start..self.current].parse::<f64>() {
             Ok(value) => Some(self.token(TokenKind::Number(value))),
-            Err(e) => {
+            Err(error) => {
                 println!(
                     "attempted to parse {}..{} (`{}`) as a float",
                     self.start,
                     self.current,
                     &self.source[self.start..self.current]
                 );
-                self.error(ScanError::InvalidNumber(e));
+                self.error(ScanError::InvalidNumber {
+                    span: self.span(),
+                    error,
+                });
                 None
             }
         }
@@ -244,9 +283,9 @@ impl<'a> Scanner<'a> {
     }
 
     fn advance(&mut self) -> Option<u8> {
-        let c = self.peek();
+        let c = self.peek()?;
         self.current += 1;
-        c
+        Some(c)
     }
 
     fn expect(&mut self, next: u8) -> bool {
@@ -259,18 +298,19 @@ impl<'a> Scanner<'a> {
         }
     }
 
+    fn span(&self) -> Span {
+        Span::scan(self.start, self.current)
+    }
+
     fn token(&mut self, kind: TokenKind) -> Token {
         Token {
             kind,
-            span: Span::new(self.start, self.current),
+            span: self.span(),
         }
     }
 
-    fn error(&mut self, error: ScanError) {
-        self.errors.push(Spanned {
-            inner: error,
-            span: Span::new(self.start, self.current),
-        });
+    fn error(&mut self, e: ScanError) {
+        self.errors.push(e);
     }
 }
 

@@ -3,12 +3,12 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 mod ast;
+mod diagnostic;
 mod interpreter;
 mod parser;
 mod scanner;
 mod span;
 
-use core::fmt;
 use std::{
     env::args_os,
     fs,
@@ -18,8 +18,11 @@ use std::{
 };
 
 use crate::{
-    ast::Visit, interpreter::Interpreter, parser::Parser, scanner::Scanner,
-    span::Spanned,
+    ast::Visit,
+    diagnostic::{Context, Diagnostic},
+    interpreter::Interpreter,
+    parser::Parser,
+    scanner::Scanner,
 };
 
 fn main() -> Result<(), Error> {
@@ -63,6 +66,7 @@ pub fn run_prompt() -> Result<(), Error> {
         }
         let mut rox = Rox::new(&line);
         rox.run();
+        println!();
     }
 
     Ok(())
@@ -74,9 +78,7 @@ pub struct Rox<'t> {
 
 impl<'t> Rox<'t> {
     pub fn new(source: &'t str) -> Self {
-        Self {
-            source,
-        }
+        Self { source }
     }
 
     pub fn run(&mut self) -> Status {
@@ -101,12 +103,10 @@ impl<'t> Rox<'t> {
             }
         }
         let Some(ast) = ast else {
-            eprintln!("Failed to parse code");
             return Status::CompilerError;
         };
 
         if !matches!(status, Status::Ok) {
-            eprintln!("Aborting due to previous errors");
             return status;
         }
 
@@ -121,8 +121,26 @@ impl<'t> Rox<'t> {
         status
     }
 
-    fn error<E: fmt::Display>(&mut self, spanned: &Spanned<E>) {
-        println!("error: {}", spanned.inner);
-        spanned.span.indicate(self.source);
+    fn error<T: Diagnostic>(&mut self, diagnostic: &T) {
+        use core::fmt;
+
+        struct Diag<'s, T> {
+            pub source: &'s str,
+            pub inner: &'s T,
+        }
+
+        impl<T: Diagnostic> fmt::Display for Diag<'_, T> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                self.inner.fmt(&mut Context::new(self.source), f)
+            }
+        }
+
+        eprintln!(
+            "{}",
+            Diag {
+                source: self.source,
+                inner: diagnostic
+            }
+        );
     }
 }

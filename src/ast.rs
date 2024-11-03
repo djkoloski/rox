@@ -1,4 +1,7 @@
-use crate::{scanner::{Token, TokenKind}, span::Span};
+use crate::{
+    scanner::{Token, TokenKind},
+    span::Span,
+};
 
 pub trait Visitor {
     type Output;
@@ -82,44 +85,66 @@ impl<V: Visitor> Visit<V> for GroupingExpr {
     }
 }
 
-pub struct Spanner;
+pub struct SpanStart;
 
-impl Visitor for Spanner {
-    type Output = Span;
+impl Visitor for SpanStart {
+    type Output = usize;
 
     fn visit_literal_expr(&mut self, literal: &LiteralExpr) -> Self::Output {
-        literal.token.span
+        literal.token.span.start()
     }
 
     fn visit_unary_expr(&mut self, unary: &UnaryExpr) -> Self::Output {
-        Span::merge(
-            unary.operator.span,
-            unary.expr.accept(self),
-        )
+        unary.operator.span.start()
     }
 
     fn visit_binary_expr(&mut self, binary: &BinaryExpr) -> Self::Output {
-        Span::merge(
-            binary.left.accept(self),
-            binary.right.accept(self),
-        )
+        binary.left.accept(self)
     }
 
     fn visit_grouping_expr(&mut self, grouping: &GroupingExpr) -> Self::Output {
-        Span::merge(
-            grouping.lparen.span,
-            grouping.rparen.span,
-        )
+        grouping.lparen.span.start()
     }
 }
 
-pub trait SpanExt {
-    fn span(&self) -> Span;
+pub struct SpanEnd;
+
+impl Visitor for SpanEnd {
+    type Output = usize;
+
+    fn visit_literal_expr(&mut self, literal: &LiteralExpr) -> Self::Output {
+        literal.token.span.end()
+    }
+
+    fn visit_unary_expr(&mut self, unary: &UnaryExpr) -> Self::Output {
+        unary.expr.accept(self)
+    }
+
+    fn visit_binary_expr(&mut self, binary: &BinaryExpr) -> Self::Output {
+        binary.right.accept(self)
+    }
+
+    fn visit_grouping_expr(&mut self, grouping: &GroupingExpr) -> Self::Output {
+        grouping.rparen.span.end()
+    }
 }
 
-impl<T: Visit<Spanner>> SpanExt for T {
+pub trait Spanned {
+    fn span_start(&self) -> usize;
+    fn span_end(&self) -> usize;
+
     fn span(&self) -> Span {
-        self.accept(&mut Spanner)
+        Span::scan(self.span_start(), self.span_end())
+    }
+}
+
+impl<T: Visit<SpanStart> + Visit<SpanEnd>> Spanned for T {
+    fn span_start(&self) -> usize {
+        self.accept(&mut SpanStart)
+    }
+
+    fn span_end(&self) -> usize {
+        self.accept(&mut SpanEnd)
     }
 }
 

@@ -2,36 +2,57 @@ use core::fmt;
 
 use crate::{
     ast::{BinaryExpr, Expr, GroupingExpr, LiteralExpr, UnaryExpr},
+    diagnostic::{Context, Diagnostic},
     scanner::{Token, TokenKind},
-    span::{Span, Spanned},
+    span::Span,
 };
 
 #[derive(Debug)]
 pub enum ParseError {
-    ExpectedExpression(TokenKind),
-    UnterminatedGroup,
-    EofDuringExpression,
+    ExpectedExpression { span: Span, kind: TokenKind },
+    UnterminatedGroup(Span),
+    EofDuringExpression(Span),
 }
 
-impl fmt::Display for ParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Diagnostic for ParseError {
+    fn fmt(
+        &self,
+        c: &mut Context<'_>,
+        f: &mut fmt::Formatter<'_>,
+    ) -> fmt::Result {
         match self {
-            Self::ExpectedExpression(kind) => {
-                write!(f, "expected an expression, found {:?}", kind)
+            Self::ExpectedExpression { span, kind } => {
+                c.error(f, format_args!("unexpected token"))?;
+                c.span(
+                    *span,
+                    f,
+                    format_args!("expressions may not start with {:?}", kind),
+                )?;
             }
-            Self::UnterminatedGroup => {
-                write!(f, "unterminated parenthesized group")
+            Self::UnterminatedGroup(span) => {
+                c.error(f, format_args!("unterminated group"))?;
+                c.span(
+                    *span,
+                    f,
+                    format_args!("this group is missing a closing ')'"),
+                )?;
             }
-            Self::EofDuringExpression => {
-                write!(f, "unexpected end of input while parsing expression")
+            Self::EofDuringExpression(span) => {
+                c.error(f, format_args!("unexpected eof"))?;
+                c.span(
+                    *span,
+                    f,
+                    format_args!("expected an expression to begin here"),
+                )?;
             }
         }
+        Ok(())
     }
 }
 
 pub struct Parser {
     tokens: Vec<Token>,
-    pub errors: Vec<Spanned<ParseError>>,
+    pub errors: Vec<ParseError>,
 }
 
 impl Parser {
@@ -146,10 +167,8 @@ impl Parser {
                         rparen,
                     })),
                     Some(token) => {
-                        self.errors.push(Spanned {
-                            inner: ParseError::UnterminatedGroup,
-                            span: token.span,
-                        });
+                        self.errors
+                            .push(ParseError::UnterminatedGroup(token.span));
 
                         self.synchronize(|kind| {
                             matches!(kind, TokenKind::RightParen)
@@ -158,26 +177,22 @@ impl Parser {
                         None
                     }
                     None => {
-                        self.errors.push(Spanned {
-                            inner: ParseError::EofDuringExpression,
-                            span: Span::eof(),
-                        });
+                        self.errors
+                            .push(ParseError::EofDuringExpression(Span::eof()));
                         None
                     }
                 }
             }
             Some(token) => {
-                self.errors.push(Spanned {
-                    inner: ParseError::ExpectedExpression(token.kind),
+                self.errors.push(ParseError::ExpectedExpression {
+                    kind: token.kind,
                     span: token.span,
                 });
                 None
             }
             None => {
-                self.errors.push(Spanned {
-                    inner: ParseError::EofDuringExpression,
-                    span: Span::eof(),
-                });
+                self.errors
+                    .push(ParseError::EofDuringExpression(Span::eof()));
                 None
             }
         }
