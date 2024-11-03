@@ -2,15 +2,15 @@ use core::fmt;
 
 use crate::{
     ast::expr::{
-        BinaryExpr, Expr, ExprVisitor, GroupingExpr, LiteralExpr, UnaryExpr,
-        VisitExpr,
+        AssignExpr, BinaryExpr, Expr, ExprVisitor, GroupingExpr, LiteralExpr,
+        UnaryExpr, VariableExpr, VisitExpr,
     },
     interpreter::{InterpretError, Interpreter},
     scanner::TokenKind,
     span::Spanned,
 };
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Nil,
     Bool(bool),
@@ -169,5 +169,29 @@ impl ExprVisitor for Interpreter {
 
     fn visit_grouping_expr(&mut self, grouping: &GroupingExpr) -> Self::Output {
         grouping.inner.accept(self)
+    }
+
+    fn visit_variable_expr(&mut self, expr: &VariableExpr) -> Self::Output {
+        let TokenKind::Identifier(ident) = &expr.ident.kind else {
+            unreachable!();
+        };
+        let Some(value) = self.environment.get(ident) else {
+            return Err(InterpretError::UndefinedVariable(expr.ident.span));
+        };
+
+        Ok(value.clone())
+    }
+
+    fn visit_assign_expr(&mut self, expr: &AssignExpr) -> Self::Output {
+        let TokenKind::Identifier(ident) = &expr.ident.kind else {
+            unreachable!();
+        };
+        if self.environment.get(ident).is_none() {
+            return Err(InterpretError::UndefinedVariable(expr.ident.span));
+        }
+        let value = self.eval(&expr.expr)?;
+        self.environment.set(ident, value.clone());
+
+        Ok(value)
     }
 }

@@ -49,10 +49,13 @@ pub enum Status {
 
 pub fn run_file(path: &Path) -> Result<Status, Error> {
     let source = fs::read_to_string(path)?;
-    Ok(run(&source))
+    let mut interpreter = Interpreter::new();
+    Ok(run(&mut interpreter, &source))
 }
 
 pub fn run_prompt() -> Result<(), Error> {
+    let mut interpreter = Interpreter::new();
+
     loop {
         print!("> ");
         stdout().flush()?;
@@ -62,14 +65,14 @@ pub fn run_prompt() -> Result<(), Error> {
         if eof || line.contains('\u{4}') {
             break;
         }
-        run(line.trim_end());
+        run(&mut interpreter, line.trim_end());
         println!();
     }
 
     Ok(())
 }
 
-pub fn run(source: &str) -> Status {
+pub fn run(interpreter: &mut Interpreter, source: &str) -> Status {
     let mut scanner = Scanner::new(source);
     let tokens = scanner.scan_tokens();
 
@@ -94,7 +97,6 @@ pub fn run(source: &str) -> Status {
         return Status::CompilerError;
     }
 
-    let mut interpreter = Interpreter;
     if let Err(error) = interpreter.interpret(&program.unwrap()) {
         emit(source, &error);
         Status::RuntimeError

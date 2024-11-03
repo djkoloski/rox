@@ -273,7 +273,7 @@ impl<'a> Scanner<'a> {
             "true" => TokenKind::True,
             "var" => TokenKind::Var,
             "while" => TokenKind::While,
-            _ => TokenKind::Identifier,
+            ident => TokenKind::Identifier(ident.to_string()),
         })
     }
 
@@ -358,7 +358,7 @@ pub enum TokenKind {
     GreaterEqual,
     Less,
     LessEqual,
-    Identifier,
+    Identifier(String),
     String(String),
     Number(f64),
     And,

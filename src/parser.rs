@@ -2,8 +2,11 @@ use core::fmt;
 
 use crate::{
     ast::{
-        expr::{BinaryExpr, Expr, GroupingExpr, LiteralExpr, UnaryExpr},
-        stmt::{ExprStmt, PrintStmt, Program, Stmt},
+        expr::{
+            AssignExpr, BinaryExpr, Expr, GroupingExpr, LiteralExpr, UnaryExpr,
+            VariableExpr,
+        },
+        stmt::{BlockStmt, DeclStmt, ExprStmt, PrintStmt, Program, Stmt},
     },
     diagnostic::{Context, Diagnostic},
     scanner::{Token, TokenKind},
@@ -15,6 +18,9 @@ pub enum ParseError {
     ExpectedExpression(Span),
     UnterminatedGroup(Span),
     UnterminatedStatement { stmt: Span, next: Span },
+    UnterminatedBlock(Span),
+    ExpectedIdent { stmt: Span, next: Span },
+    InvalidAssignmentTarget(Span),
 }
 
 impl Diagnostic for ParseError {
@@ -54,6 +60,37 @@ impl Diagnostic for ParseError {
                     ),
                 )?;
             }
+            Self::UnterminatedBlock(span) => {
+                c.error(f, format_args!("unterminated block"))?;
+                c.span(
+                    *span,
+                    f,
+                    format_args!("this block is missing a closing '}}'"),
+                )?;
+            }
+            Self::ExpectedIdent { stmt, next } => {
+                c.error(f, format_args!("expected identifier"))?;
+                c.span(
+                    *stmt,
+                    f,
+                    format_args!(
+                        "this variable declaration was followed by '{}' \
+                         instead of a valid identifier",
+                        next.get(c.source())
+                    ),
+                )?;
+            }
+            Self::InvalidAssignmentTarget(span) => {
+                c.error(f, format_args!("invalid assignment target"))?;
+                c.span(
+                    *span,
+                    f,
+                    format_args!(
+                        "this is the left-hand side of an assignment \
+                         expression, but is not a place"
+                    ),
+                )?;
+            }
         }
         Ok(())
     }
@@ -81,6 +118,17 @@ impl Parser {
         self.tokens.last().unwrap()
     }
 
+    fn expect(
+        &mut self,
+        matches: impl FnOnce(&TokenKind) -> bool,
+    ) -> Option<Token> {
+        if matches(&self.peek().kind) {
+            Some(self.next())
+        } else {
+            None
+        }
+    }
+
     fn next(&mut self) -> Token {
         self.tokens.pop().unwrap()
     }
@@ -92,7 +140,7 @@ impl Parser {
             match self.peek().kind {
                 TokenKind::Eof => break,
                 _ => {
-                    if let Some(stmt) = self.statement() {
+                    if let Some(stmt) = self.declaration() {
                         stmts.push(stmt);
                     } else {
                         self.synchronize(|kind| {
@@ -109,9 +157,60 @@ impl Parser {
         })
     }
 
+    fn declaration(&mut self) -> Option<Stmt> {
+        match self.peek().kind {
+            TokenKind::Var => self.decl_stmt(),
+            _ => self.statement(),
+        }
+    }
+
+    fn decl_stmt(&mut self) -> Option<Stmt> {
+        let var = self.next();
+        let Some(ident) =
+            self.expect(|k| matches!(k, TokenKind::Identifier(_)))
+        else {
+            self.errors.push(ParseError::ExpectedIdent {
+                stmt: var.span(),
+                next: self.peek().span,
+            });
+            return None;
+        };
+
+        let assignment = if matches!(self.peek().kind, TokenKind::Equal) {
+            let equal = self.next();
+            let expr = self.expression()?;
+            Some((equal, expr))
+        } else {
+            None
+        };
+
+        let Some(semi) = self.expect(|k| matches!(k, TokenKind::Semicolon))
+        else {
+            let stmt = if let Some((_, expr)) = &assignment {
+                Span::across(&var, expr)
+            } else {
+                Span::across(&var, &ident)
+            };
+
+            self.errors.push(ParseError::UnterminatedStatement {
+                stmt,
+                next: self.peek().span,
+            });
+            return None;
+        };
+
+        Some(Stmt::Decl(DeclStmt {
+            var,
+            ident,
+            assignment,
+            semi,
+        }))
+    }
+
     fn statement(&mut self) -> Option<Stmt> {
         match self.peek().kind {
             TokenKind::Print => self.print_stmt(),
+            TokenKind::LeftBrace => self.block_stmt(),
             _ => self.expr_stmt(),
         }
     }
@@ -119,39 +218,85 @@ impl Parser {
     fn print_stmt(&mut self) -> Option<Stmt> {
         let print = self.next();
         let expr = self.expression()?;
-        if !matches!(self.peek().kind, TokenKind::Semicolon) {
+        let Some(semi) = self.expect(|k| matches!(k, TokenKind::Semicolon))
+        else {
             self.errors.push(ParseError::UnterminatedStatement {
                 stmt: Span::across(&print, &expr),
                 next: self.peek().span,
             });
             return None;
+        };
+
+        Some(Stmt::Print(PrintStmt { print, expr, semi }))
+    }
+
+    fn block_stmt(&mut self) -> Option<Stmt> {
+        let lbrace = self.next();
+        let mut stmts = Vec::new();
+
+        loop {
+            match self.peek().kind {
+                TokenKind::RightBrace => break,
+                TokenKind::Eof => {
+                    let span = if stmts.is_empty() {
+                        lbrace.span()
+                    } else {
+                        Span::across(&lbrace, stmts.last().unwrap())
+                    };
+                    self.errors.push(ParseError::UnterminatedBlock(span));
+                    return None;
+                }
+                _ => stmts.push(self.declaration()?),
+            }
         }
 
-        Some(Stmt::Print(PrintStmt {
-            print,
-            expr,
-            semi: self.next(),
+        let rbrace = self.next();
+
+        Some(Stmt::Block(BlockStmt {
+            lbrace,
+            stmts,
+            rbrace,
         }))
     }
 
     fn expr_stmt(&mut self) -> Option<Stmt> {
         let expr = self.expression()?;
-        if !matches!(self.peek().kind, TokenKind::Semicolon) {
+        let Some(semi) = self.expect(|k| matches!(k, TokenKind::Semicolon))
+        else {
             self.errors.push(ParseError::UnterminatedStatement {
                 stmt: expr.span(),
                 next: self.peek().span,
             });
             return None;
-        }
+        };
 
-        Some(Stmt::Expr(ExprStmt {
-            expr,
-            semi: self.next(),
-        }))
+        Some(Stmt::Expr(ExprStmt { expr, semi }))
     }
 
     fn expression(&mut self) -> Option<Expr> {
-        self.equality()
+        self.assignment()
+    }
+
+    fn assignment(&mut self) -> Option<Expr> {
+        let expr = self.equality()?;
+
+        if let Some(equal) = self.expect(|k| matches!(k, TokenKind::Equal)) {
+            let value = self.assignment()?;
+
+            if let Expr::Variable(VariableExpr { ident }) = expr {
+                Some(Expr::Assign(AssignExpr {
+                    ident,
+                    equal,
+                    expr: Box::new(value),
+                }))
+            } else {
+                self.errors
+                    .push(ParseError::InvalidAssignmentTarget(expr.span()));
+                None
+            }
+        } else {
+            Some(expr)
+        }
     }
 
     fn equality(&mut self) -> Option<Expr> {
@@ -242,6 +387,9 @@ impl Parser {
                         None
                     }
                 }
+            }
+            TokenKind::Identifier(_) => {
+                Some(Expr::Variable(VariableExpr { ident: self.next() }))
             }
             _ => {
                 self.errors

@@ -7,6 +7,8 @@ pub trait ExprVisitor {
     fn visit_unary_expr(&mut self, expr: &UnaryExpr) -> Self::Output;
     fn visit_binary_expr(&mut self, expr: &BinaryExpr) -> Self::Output;
     fn visit_grouping_expr(&mut self, expr: &GroupingExpr) -> Self::Output;
+    fn visit_variable_expr(&mut self, expr: &VariableExpr) -> Self::Output;
+    fn visit_assign_expr(&mut self, expr: &AssignExpr) -> Self::Output;
 }
 
 pub trait VisitExpr<V: ExprVisitor> {
@@ -18,6 +20,8 @@ pub enum Expr {
     Unary(UnaryExpr),
     Binary(BinaryExpr),
     Grouping(GroupingExpr),
+    Variable(VariableExpr),
+    Assign(AssignExpr),
 }
 
 impl Spanned for Expr {
@@ -27,6 +31,8 @@ impl Spanned for Expr {
             Self::Unary(expr) => expr.span_start(),
             Self::Binary(expr) => expr.span_start(),
             Self::Grouping(expr) => expr.span_start(),
+            Self::Variable(expr) => expr.span_start(),
+            Self::Assign(expr) => expr.span_start(),
         }
     }
 
@@ -36,6 +42,8 @@ impl Spanned for Expr {
             Self::Unary(expr) => expr.span_end(),
             Self::Binary(expr) => expr.span_end(),
             Self::Grouping(expr) => expr.span_end(),
+            Self::Variable(expr) => expr.span_end(),
+            Self::Assign(expr) => expr.span_end(),
         }
     }
 }
@@ -47,6 +55,8 @@ impl<V: ExprVisitor> VisitExpr<V> for Expr {
             Self::Unary(expr) => visitor.visit_unary_expr(expr),
             Self::Binary(expr) => visitor.visit_binary_expr(expr),
             Self::Grouping(expr) => visitor.visit_grouping_expr(expr),
+            Self::Variable(expr) => visitor.visit_variable_expr(expr),
+            Self::Assign(expr) => visitor.visit_assign_expr(expr),
         }
     }
 }
@@ -133,5 +143,47 @@ impl Spanned for GroupingExpr {
 impl<V: ExprVisitor> VisitExpr<V> for GroupingExpr {
     fn accept(&self, visitor: &mut V) -> V::Output {
         self.inner.accept(visitor)
+    }
+}
+
+pub struct VariableExpr {
+    pub ident: Token,
+}
+
+impl Spanned for VariableExpr {
+    fn span_start(&self) -> usize {
+        self.ident.span_start()
+    }
+
+    fn span_end(&self) -> usize {
+        self.ident.span_end()
+    }
+}
+
+impl<V: ExprVisitor> VisitExpr<V> for VariableExpr {
+    fn accept(&self, visitor: &mut V) -> <V as ExprVisitor>::Output {
+        visitor.visit_variable_expr(self)
+    }
+}
+
+pub struct AssignExpr {
+    pub ident: Token,
+    pub equal: Token,
+    pub expr: Box<Expr>,
+}
+
+impl Spanned for AssignExpr {
+    fn span_start(&self) -> usize {
+        self.ident.span_start()
+    }
+
+    fn span_end(&self) -> usize {
+        self.expr.span_end()
+    }
+}
+
+impl<V: ExprVisitor> VisitExpr<V> for AssignExpr {
+    fn accept(&self, visitor: &mut V) -> <V as ExprVisitor>::Output {
+        visitor.visit_assign_expr(self)
     }
 }

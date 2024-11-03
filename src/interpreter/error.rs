@@ -26,6 +26,7 @@ pub enum InterpretError {
         actual: Value,
     },
     DivideByZero(Span),
+    UndefinedVariable(Span),
 }
 
 impl Diagnostic for InterpretError {
@@ -102,6 +103,17 @@ impl Diagnostic for InterpretError {
                     *span,
                     f,
                     format_args!("this expression evaluated to zero"),
+                )?;
+            }
+            Self::UndefinedVariable(span) => {
+                c.error(f, format_args!("undefined variable"))?;
+                c.span(
+                    *span,
+                    f,
+                    format_args!(
+                        "'{}' is not defined here",
+                        span.get(c.source())
+                    ),
                 )?;
             }
         }
