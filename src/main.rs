@@ -18,7 +18,6 @@ use std::{
 };
 
 use crate::{
-    ast::Visit,
     diagnostic::{Context, Diagnostic},
     interpreter::Interpreter,
     parser::Parser,
@@ -50,8 +49,7 @@ pub enum Status {
 
 pub fn run_file(path: &Path) -> Result<Status, Error> {
     let source = fs::read_to_string(path)?;
-    let mut rox = Rox::new(&source);
-    Ok(rox.run())
+    Ok(run(&source))
 }
 
 pub fn run_prompt() -> Result<(), Error> {
@@ -64,83 +62,66 @@ pub fn run_prompt() -> Result<(), Error> {
         if eof || line.contains('\u{4}') {
             break;
         }
-        let mut rox = Rox::new(&line);
-        rox.run();
+        run(line.trim_end());
         println!();
     }
 
     Ok(())
 }
 
-pub struct Rox<'t> {
-    source: &'t str,
+pub fn run(source: &str) -> Status {
+    let mut scanner = Scanner::new(source);
+    let tokens = scanner.scan_tokens();
+
+    if !scanner.errors.is_empty() {
+        for error in &scanner.errors {
+            emit(source, error);
+        }
+    }
+
+    let mut parser = Parser::new(tokens);
+    let program = parser.parse();
+    if !parser.errors.is_empty() {
+        for error in &parser.errors {
+            emit(source, error);
+        }
+    }
+
+    if !scanner.errors.is_empty()
+        || !parser.errors.is_empty()
+        || program.is_none()
+    {
+        return Status::CompilerError;
+    }
+
+    let mut interpreter = Interpreter;
+    if let Err(error) = interpreter.interpret(&program.unwrap()) {
+        emit(source, &error);
+        Status::RuntimeError
+    } else {
+        Status::Ok
+    }
 }
 
-impl<'t> Rox<'t> {
-    pub fn new(source: &'t str) -> Self {
-        Self { source }
+fn emit<T: Diagnostic>(source: &str, diagnostic: &T) {
+    use core::fmt;
+
+    struct Diag<'s, T> {
+        pub source: &'s str,
+        pub inner: &'s T,
     }
 
-    pub fn run(&mut self) -> Status {
-        let mut status = Status::Ok;
-
-        let mut scanner = Scanner::new(self.source);
-        let tokens = scanner.scan_tokens();
-
-        if !scanner.errors.is_empty() {
-            status = Status::CompilerError;
-            for error in &scanner.errors {
-                self.error(error);
-            }
+    impl<T: Diagnostic> fmt::Display for Diag<'_, T> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            self.inner.fmt(&mut Context::new(self.source), f)
         }
-
-        let mut parser = Parser::new(tokens);
-        let ast = parser.parse();
-        if !parser.errors.is_empty() {
-            status = Status::CompilerError;
-            for error in &parser.errors {
-                self.error(error);
-            }
-        }
-        let Some(ast) = ast else {
-            return Status::CompilerError;
-        };
-
-        if !matches!(status, Status::Ok) {
-            return status;
-        }
-
-        match ast.accept(&mut Interpreter) {
-            Ok(value) => println!("{value}"),
-            Err(error) => {
-                status = Status::RuntimeError;
-                self.error(&error);
-            }
-        }
-
-        status
     }
 
-    fn error<T: Diagnostic>(&mut self, diagnostic: &T) {
-        use core::fmt;
-
-        struct Diag<'s, T> {
-            pub source: &'s str,
-            pub inner: &'s T,
+    eprintln!(
+        "{}",
+        Diag {
+            source,
+            inner: diagnostic
         }
-
-        impl<T: Diagnostic> fmt::Display for Diag<'_, T> {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                self.inner.fmt(&mut Context::new(self.source), f)
-            }
-        }
-
-        eprintln!(
-            "{}",
-            Diag {
-                source: self.source,
-                inner: diagnostic
-            }
-        );
-    }
+    );
 }

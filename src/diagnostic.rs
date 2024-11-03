@@ -29,17 +29,8 @@ impl<'s> Context<'s> {
         f: &mut fmt::Formatter<'_>,
         args: fmt::Arguments<'_>,
     ) -> fmt::Result {
-        let (start, end) = if span.is_eof() {
-            (
-                Position::from_source(self.source, self.source.len()),
-                Position::from_source(self.source, self.source.len()),
-            )
-        } else {
-            (
-                Position::from_source(self.source, span.start()),
-                Position::from_source(self.source, span.end()),
-            )
-        };
+        let start = Position::from_source(self.source, span.start());
+        let end = Position::from_source(self.source, span.end());
 
         let width =
             u32::max(start.line_number.ilog10(), end.line_number.ilog10()) + 1;

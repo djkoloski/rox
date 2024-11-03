@@ -1,100 +1,14 @@
 use core::fmt;
 
 use crate::{
-    ast::{
-        BinaryExpr, GroupingExpr, LiteralExpr, Spanned, UnaryExpr, Visit,
-        Visitor,
+    ast::expr::{
+        BinaryExpr, Expr, ExprVisitor, GroupingExpr, LiteralExpr, UnaryExpr,
+        VisitExpr,
     },
-    diagnostic::{Context, Diagnostic},
+    interpreter::{InterpretError, Interpreter},
     scanner::TokenKind,
-    span::Span,
+    span::Spanned,
 };
-
-#[derive(Debug)]
-pub enum InterpretError {
-    #[allow(dead_code)]
-    ExpectedBoolean {
-        span: Span,
-        actual: Value,
-    },
-    ExpectedNumber {
-        span: Span,
-        actual: Value,
-    },
-    ExpectedString {
-        span: Span,
-        actual: Value,
-    },
-    ExpectedNumberOrString {
-        span: Span,
-        actual: Value,
-    },
-    DivideByZero(Span),
-}
-
-impl Diagnostic for InterpretError {
-    fn fmt(
-        &self,
-        c: &mut Context<'_>,
-        f: &mut fmt::Formatter<'_>,
-    ) -> fmt::Result {
-        match self {
-            Self::ExpectedBoolean { span, actual } => {
-                c.error(f, format_args!("unexpected non-boolean value"))?;
-                c.span(
-                    *span,
-                    f,
-                    format_args!(
-                        "expected this to be a boolean, but it was '{actual}'"
-                    ),
-                )?;
-            }
-            Self::ExpectedNumber { span, actual } => {
-                c.error(f, format_args!("unexpected non-number value"))?;
-                c.span(
-                    *span,
-                    f,
-                    format_args!(
-                        "expected this to be a number, but it was '{actual}'"
-                    ),
-                )?;
-            }
-            Self::ExpectedString { span, actual } => {
-                c.error(f, format_args!("unexpected non-string value"))?;
-                c.span(
-                    *span,
-                    f,
-                    format_args!(
-                        "expected this to be a string, but it was '{actual}'"
-                    ),
-                )?;
-            }
-            Self::ExpectedNumberOrString { span, actual } => {
-                c.error(
-                    f,
-                    format_args!("unexpected non-number, non-string value"),
-                )?;
-                c.span(
-                    *span,
-                    f,
-                    format_args!(
-                        "expected this to be a number or string, but it was \
-                         '{actual}'"
-                    ),
-                )?;
-            }
-            Self::DivideByZero(span) => {
-                c.error(f, format_args!("attempted to divide by zero"))?;
-                c.span(
-                    *span,
-                    f,
-                    format_args!("this denominator evaluated to zero"),
-                )?;
-            }
-        }
-        Ok(())
-    }
-}
 
 #[derive(Debug, PartialEq)]
 pub enum Value {
@@ -132,45 +46,30 @@ impl Value {
     }
 }
 
-pub struct Interpreter;
-
 impl Interpreter {
-    fn eval<V>(&mut self, v: &V) -> Result<Value, InterpretError>
-    where
-        V: Visit<Self>,
-    {
-        v.accept(self)
-    }
-
     #[allow(dead_code)]
-    pub fn eval_boolean<V>(&mut self, v: &V) -> Result<bool, InterpretError>
-    where
-        V: Visit<Self> + Spanned,
-    {
-        match self.eval(v)? {
+    fn eval_boolean(&mut self, expr: &Expr) -> Result<bool, InterpretError> {
+        match self.eval(expr)? {
             Value::Bool(b) => Ok(b),
             actual => Err(InterpretError::ExpectedBoolean {
-                span: v.span(),
+                span: expr.span(),
                 actual,
             }),
         }
     }
 
-    fn eval_number<V>(&mut self, v: &V) -> Result<f64, InterpretError>
-    where
-        V: Visit<Self> + Spanned,
-    {
-        match self.eval(v)? {
+    fn eval_number(&mut self, expr: &Expr) -> Result<f64, InterpretError> {
+        match self.eval(expr)? {
             Value::Number(n) => Ok(n),
             actual => Err(InterpretError::ExpectedNumber {
-                span: v.span(),
+                span: expr.span(),
                 actual,
             }),
         }
     }
 }
 
-impl Visitor for Interpreter {
+impl ExprVisitor for Interpreter {
     type Output = Result<Value, InterpretError>;
 
     fn visit_literal_expr(&mut self, literal: &LiteralExpr) -> Self::Output {
@@ -187,9 +86,9 @@ impl Visitor for Interpreter {
     fn visit_unary_expr(&mut self, unary: &UnaryExpr) -> Self::Output {
         Ok(match unary.operator.kind {
             TokenKind::Bang => {
-                Value::Bool(!self.eval(&unary.expr)?.truthiness())
+                Value::Bool(!self.eval(&unary.inner)?.truthiness())
             }
-            TokenKind::Minus => Value::Number(-self.eval_number(&unary.expr)?),
+            TokenKind::Minus => Value::Number(-self.eval_number(&unary.inner)?),
             _ => unreachable!(),
         })
     }
@@ -269,6 +168,6 @@ impl Visitor for Interpreter {
     }
 
     fn visit_grouping_expr(&mut self, grouping: &GroupingExpr) -> Self::Output {
-        grouping.expr.accept(self)
+        grouping.inner.accept(self)
     }
 }

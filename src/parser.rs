@@ -1,17 +1,20 @@
 use core::fmt;
 
 use crate::{
-    ast::{BinaryExpr, Expr, GroupingExpr, LiteralExpr, UnaryExpr},
+    ast::{
+        expr::{BinaryExpr, Expr, GroupingExpr, LiteralExpr, UnaryExpr},
+        stmt::{ExprStmt, PrintStmt, Program, Stmt},
+    },
     diagnostic::{Context, Diagnostic},
     scanner::{Token, TokenKind},
-    span::Span,
+    span::{Span, Spanned as _},
 };
 
 #[derive(Debug)]
 pub enum ParseError {
-    ExpectedExpression { span: Span, kind: TokenKind },
+    ExpectedExpression(Span),
     UnterminatedGroup(Span),
-    EofDuringExpression(Span),
+    UnterminatedStatement { stmt: Span, next: Span },
 }
 
 impl Diagnostic for ParseError {
@@ -21,12 +24,15 @@ impl Diagnostic for ParseError {
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         match self {
-            Self::ExpectedExpression { span, kind } => {
+            Self::ExpectedExpression(span) => {
                 c.error(f, format_args!("unexpected token"))?;
                 c.span(
                     *span,
                     f,
-                    format_args!("expressions may not start with {:?}", kind),
+                    format_args!(
+                        "expected expression, found '{}'",
+                        span.get(c.source())
+                    ),
                 )?;
             }
             Self::UnterminatedGroup(span) => {
@@ -37,12 +43,15 @@ impl Diagnostic for ParseError {
                     format_args!("this group is missing a closing ')'"),
                 )?;
             }
-            Self::EofDuringExpression(span) => {
-                c.error(f, format_args!("unexpected eof"))?;
+            Self::UnterminatedStatement { stmt, next } => {
+                c.error(f, format_args!("unterminated statement"))?;
                 c.span(
-                    *span,
+                    *stmt,
                     f,
-                    format_args!("expected an expression to begin here"),
+                    format_args!(
+                        "this statement was followed by '{}' instead of ';'",
+                        next.get(c.source())
+                    ),
                 )?;
             }
         }
@@ -64,16 +73,81 @@ impl Parser {
         }
     }
 
-    pub fn parse(&mut self) -> Option<Expr> {
-        self.expression()
+    pub fn parse(&mut self) -> Option<Program> {
+        self.program()
     }
 
-    fn peek(&self) -> Option<&TokenKind> {
-        self.tokens.last().map(|t| &t.kind)
+    fn peek(&self) -> &Token {
+        self.tokens.last().unwrap()
     }
 
-    fn next(&mut self) -> Option<Token> {
-        self.tokens.pop()
+    fn next(&mut self) -> Token {
+        self.tokens.pop().unwrap()
+    }
+
+    fn program(&mut self) -> Option<Program> {
+        let mut stmts = Vec::new();
+
+        loop {
+            match self.peek().kind {
+                TokenKind::Eof => break,
+                _ => {
+                    if let Some(stmt) = self.statement() {
+                        stmts.push(stmt);
+                    } else {
+                        self.synchronize(|kind| {
+                            matches!(kind, TokenKind::Semicolon)
+                        });
+                    }
+                }
+            }
+        }
+
+        Some(Program {
+            stmts,
+            eof: self.next(),
+        })
+    }
+
+    fn statement(&mut self) -> Option<Stmt> {
+        match self.peek().kind {
+            TokenKind::Print => self.print_stmt(),
+            _ => self.expr_stmt(),
+        }
+    }
+
+    fn print_stmt(&mut self) -> Option<Stmt> {
+        let print = self.next();
+        let expr = self.expression()?;
+        if !matches!(self.peek().kind, TokenKind::Semicolon) {
+            self.errors.push(ParseError::UnterminatedStatement {
+                stmt: Span::across(&print, &expr),
+                next: self.peek().span,
+            });
+            return None;
+        }
+
+        Some(Stmt::Print(PrintStmt {
+            print,
+            expr,
+            semi: self.next(),
+        }))
+    }
+
+    fn expr_stmt(&mut self) -> Option<Stmt> {
+        let expr = self.expression()?;
+        if !matches!(self.peek().kind, TokenKind::Semicolon) {
+            self.errors.push(ParseError::UnterminatedStatement {
+                stmt: expr.span(),
+                next: self.peek().span,
+            });
+            return None;
+        }
+
+        Some(Stmt::Expr(ExprStmt {
+            expr,
+            semi: self.next(),
+        }))
     }
 
     fn expression(&mut self) -> Option<Expr> {
@@ -117,12 +191,12 @@ impl Parser {
     }
 
     fn unary(&mut self) -> Option<Expr> {
-        if matches!(self.peek(), Some(TokenKind::Bang | TokenKind::Minus)) {
-            let operator = self.next().unwrap();
-            let expr = self.unary()?;
+        if matches!(self.peek().kind, TokenKind::Bang | TokenKind::Minus) {
+            let operator = self.next();
+            let inner = self.unary()?;
             Some(Expr::Unary(UnaryExpr {
                 operator,
-                expr: Box::new(expr),
+                inner: Box::new(inner),
             }))
         } else {
             self.primary()
@@ -130,45 +204,36 @@ impl Parser {
     }
 
     fn primary(&mut self) -> Option<Expr> {
-        match self.next() {
-            Some(
-                token @ Token {
-                    kind:
-                        TokenKind::Number(_)
-                        | TokenKind::String(_)
-                        | TokenKind::True
-                        | TokenKind::False
-                        | TokenKind::Nil,
-                    ..
-                },
-            ) => Some(Expr::Literal(LiteralExpr { token })),
-            Some(
-                token @ Token {
-                    kind: TokenKind::LeftParen,
-                    ..
-                },
-            ) => {
-                let Some(expr) = self.expression() else {
+        match self.peek().kind {
+            TokenKind::Number(_)
+            | TokenKind::String(_)
+            | TokenKind::True
+            | TokenKind::False
+            | TokenKind::Nil => {
+                Some(Expr::Literal(LiteralExpr { token: self.next() }))
+            }
+            TokenKind::LeftParen => {
+                let lparen = self.next();
+
+                let Some(inner) = self.expression() else {
                     self.synchronize(|kind| {
                         matches!(kind, TokenKind::RightParen)
                     });
                     return None;
                 };
 
-                match self.next() {
-                    Some(
-                        rparen @ Token {
-                            kind: TokenKind::RightParen,
-                            ..
-                        },
-                    ) => Some(Expr::Grouping(GroupingExpr {
-                        lparen: token,
-                        expr: Box::new(expr),
-                        rparen,
-                    })),
-                    Some(token) => {
-                        self.errors
-                            .push(ParseError::UnterminatedGroup(token.span));
+                match self.peek().kind {
+                    TokenKind::RightParen => {
+                        Some(Expr::Grouping(GroupingExpr {
+                            lparen,
+                            inner: Box::new(inner),
+                            rparen: self.next(),
+                        }))
+                    }
+                    _ => {
+                        self.errors.push(ParseError::UnterminatedGroup(
+                            Span::across(&lparen, &inner),
+                        ));
 
                         self.synchronize(|kind| {
                             matches!(kind, TokenKind::RightParen)
@@ -176,32 +241,20 @@ impl Parser {
 
                         None
                     }
-                    None => {
-                        self.errors
-                            .push(ParseError::EofDuringExpression(Span::eof()));
-                        None
-                    }
                 }
             }
-            Some(token) => {
-                self.errors.push(ParseError::ExpectedExpression {
-                    kind: token.kind,
-                    span: token.span,
-                });
-                None
-            }
-            None => {
+            _ => {
                 self.errors
-                    .push(ParseError::EofDuringExpression(Span::eof()));
+                    .push(ParseError::ExpectedExpression(self.peek().span));
                 None
             }
         }
     }
 
     fn synchronize(&mut self, matches: impl Fn(&TokenKind) -> bool) {
-        while let Some(kind) = &self.peek() {
-            if !matches(kind) {
-                self.next();
+        while !matches!(self.peek().kind, TokenKind::Eof) {
+            if matches(&self.next().kind) {
+                break;
             }
         }
     }
@@ -213,8 +266,8 @@ impl Parser {
     ) -> Option<Expr> {
         let mut expr = operand(self)?;
 
-        while self.peek().is_some_and(&matches) {
-            let operator = self.next().unwrap();
+        while matches(&self.peek().kind) {
+            let operator = self.next();
             let right = operand(self)?;
             expr = Expr::Binary(BinaryExpr {
                 left: Box::new(expr),

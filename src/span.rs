@@ -43,15 +43,11 @@ impl Span {
         Self { start, end }
     }
 
-    pub fn eof() -> Self {
+    pub fn across(left: &impl Spanned, right: &impl Spanned) -> Self {
         Self {
-            start: usize::MAX,
-            end: usize::MAX,
+            start: left.span_start(),
+            end: right.span_end(),
         }
-    }
-
-    pub fn is_eof(&self) -> bool {
-        self.start == usize::MAX && self.end == usize::MAX
     }
 
     pub fn start(&self) -> usize {
@@ -63,10 +59,15 @@ impl Span {
     }
 
     pub fn get<'t>(&self, text: &'t str) -> &'t str {
-        if self.is_eof() {
-            ""
-        } else {
-            &text[self.start..self.end]
-        }
+        &text[self.start..self.end]
+    }
+}
+
+pub trait Spanned {
+    fn span_start(&self) -> usize;
+    fn span_end(&self) -> usize;
+
+    fn span(&self) -> Span {
+        Span::scan(self.span_start(), self.span_end())
     }
 }

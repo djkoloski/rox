@@ -2,7 +2,7 @@ use core::{fmt, num::ParseFloatError};
 
 use crate::{
     diagnostic::{Context, Diagnostic},
-    span::Span,
+    span::{Span, Spanned},
 };
 
 #[derive(Debug)]
@@ -87,7 +87,10 @@ impl<'a> Scanner<'a> {
 
         loop {
             self.start = self.current;
-            let Some(c) = self.advance() else { break };
+            let Some(c) = self.advance() else {
+                result.push(self.token(TokenKind::Eof));
+                break;
+            };
 
             if let Some(token) = self.scan_token(c) {
                 result.push(token);
@@ -320,6 +323,20 @@ pub struct Token {
     pub span: Span,
 }
 
+impl Spanned for Token {
+    fn span_start(&self) -> usize {
+        self.span.start()
+    }
+
+    fn span_end(&self) -> usize {
+        self.span.end()
+    }
+
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
 #[derive(Debug)]
 pub enum TokenKind {
     LeftParen,
@@ -360,4 +377,5 @@ pub enum TokenKind {
     True,
     Var,
     While,
+    Eof,
 }
