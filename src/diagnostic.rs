@@ -6,6 +6,11 @@ pub struct Context<'s> {
     source: &'s str,
 }
 
+const BRIGHT_RED: &str = "\x1b[31;1m";
+const BRIGHT_WHITE: &str = "\x1b[97m";
+const BRIGHT_CYAN: &str = "\x1b[96;1m";
+const RESET_COLOR: &str = "\x1b[0m";
+
 impl<'s> Context<'s> {
     pub fn new(source: &'s str) -> Self {
         Self { source }
@@ -20,7 +25,7 @@ impl<'s> Context<'s> {
         f: &mut fmt::Formatter<'_>,
         args: fmt::Arguments<'_>,
     ) -> fmt::Result {
-        writeln!(f, "\x1b[31;1merror\x1b[97m: {args}\x1b[0m")
+        writeln!(f, "{BRIGHT_RED}error{BRIGHT_WHITE}: {args}{RESET_COLOR}")
     }
 
     pub fn span(
@@ -37,14 +42,14 @@ impl<'s> Context<'s> {
 
         writeln!(
             f,
-            "\x1b[96;1m{:width$} |\x1b[0m",
+            "{BRIGHT_CYAN}{:width$} |{RESET_COLOR}",
             "",
             width = width as usize,
         )?;
 
         writeln!(
             f,
-            "\x1b[96;1m{:width$} |\x1b[0m   {}",
+            "{BRIGHT_CYAN}{:width$} |{RESET_COLOR}   {}",
             start.line_number,
             &self.source[start.line_start..start.line_end],
             width = width as usize,
@@ -53,8 +58,8 @@ impl<'s> Context<'s> {
         if start.line_number == end.line_number {
             writeln!(
                 f,
-                "\x1b[96;1m{:width$} |\x1b[0m   \
-                 {:column$}\x1b[31;1m{:^^length$} {args}\x1b[0m",
+                "{BRIGHT_CYAN}{:width$} |{RESET_COLOR}   \
+                 {:column$}{BRIGHT_RED}{:^^length$} {args}{RESET_COLOR}",
                 "",
                 "",
                 "",
@@ -65,7 +70,8 @@ impl<'s> Context<'s> {
         } else {
             writeln!(
                 f,
-                "\x1b[96;1m{:width$} |\x1b[0m  \x1b[31;1m_{:_^column$}^\x1b[0m",
+                "{BRIGHT_CYAN}{:width$} |{RESET_COLOR}  \
+                 {BRIGHT_RED}_{:_^column$}^{RESET_COLOR}",
                 "",
                 "",
                 width = width as usize,
@@ -73,15 +79,16 @@ impl<'s> Context<'s> {
             )?;
             writeln!(
                 f,
-                "\x1b[96;1m{:width$} |\x1b[0m \x1b[31;1m|\x1b[0m {}",
+                "{BRIGHT_CYAN}{:width$} |{RESET_COLOR} \
+                 {BRIGHT_RED}|{RESET_COLOR} {}",
                 end.line_number,
                 &self.source[end.line_start..end.line_end],
                 width = width as usize,
             )?;
             writeln!(
                 f,
-                "{:width$} \x1b[96;1m|\x1b[0m \x1b[31;1m|_{:_^column$}^ \
-                 {args}\x1b[0m",
+                "{:width$} {BRIGHT_CYAN}|{RESET_COLOR} \
+                 {BRIGHT_RED}|_{:_^column$}^ {args}{RESET_COLOR}",
                 "",
                 "",
                 width = width as usize,

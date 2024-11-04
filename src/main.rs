@@ -96,6 +96,7 @@ pub fn run_prompt() -> Result<(), Error> {
         if eof || line.contains('\u{4}') {
             break;
         }
+        line = line.trim_end().to_string();
 
         let mut scanner = Scanner::new(&line);
         let tokens = scanner.scan_tokens();
