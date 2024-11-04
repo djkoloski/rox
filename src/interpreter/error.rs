@@ -27,6 +27,7 @@ pub enum InterpretError {
     },
     DivideByZero(Span),
     UndefinedVariable(Span),
+    UninitializedVariable(Span),
 }
 
 impl Diagnostic for InterpretError {
@@ -112,6 +113,21 @@ impl Diagnostic for InterpretError {
                     f,
                     format_args!(
                         "'{}' is not defined here",
+                        span.get(c.source())
+                    ),
+                )?;
+            }
+            Self::UninitializedVariable(span) => {
+                c.error(
+                    f,
+                    format_args!("variable not initialized before use"),
+                )?;
+                c.span(
+                    *span,
+                    f,
+                    format_args!(
+                        "'{}' was declared, but wasn't assigned a value \
+                         before being used here",
                         span.get(c.source())
                     ),
                 )?;

@@ -12,6 +12,7 @@ use crate::{
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
+    Uninitialized,
     Nil,
     Bool(bool),
     Number(f64),
@@ -22,6 +23,7 @@ pub enum Value {
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Uninitialized => write!(f, "uninitialized"),
             Self::Nil => write!(f, "nil"),
             Self::Bool(b) => {
                 if *b {
@@ -39,7 +41,7 @@ impl fmt::Display for Value {
 impl Value {
     pub fn truthiness(&self) -> bool {
         match self {
-            Self::Nil => false,
+            Self::Uninitialized | Self::Nil => false,
             Self::Bool(b) => *b,
             Self::Number(_) | Self::String(_) => true,
         }
@@ -178,6 +180,9 @@ impl ExprVisitor for Interpreter {
         let Some(value) = self.environment.get(ident) else {
             return Err(InterpretError::UndefinedVariable(expr.ident.span));
         };
+        if matches!(value, Value::Uninitialized) {
+            return Err(InterpretError::UninitializedVariable(expr.ident.span));
+        }
 
         Ok(value.clone())
     }

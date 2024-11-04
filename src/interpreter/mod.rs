@@ -102,7 +102,7 @@ impl StmtVisitor for Interpreter {
         let value = if let Some(assignment) = &stmt.assignment {
             self.eval(&assignment.1)?
         } else {
-            Value::Nil
+            Value::Uninitialized
         };
         let TokenKind::Identifier(ident) = &stmt.ident.kind else {
             unreachable!()
