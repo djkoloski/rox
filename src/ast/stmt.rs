@@ -1,4 +1,8 @@
-use crate::{ast::expr::Expr, scanner::Token, span::Spanned};
+use crate::{
+    ast::expr::{Expr, GroupingExpr},
+    scanner::Token,
+    span::Spanned,
+};
 
 pub trait StmtVisitor {
     type Output;
@@ -7,6 +11,7 @@ pub trait StmtVisitor {
     fn visit_expr_stmt(&mut self, stmt: &ExprStmt) -> Self::Output;
     fn visit_print_stmt(&mut self, stmt: &PrintStmt) -> Self::Output;
     fn visit_block_stmt(&mut self, stmt: &BlockStmt) -> Self::Output;
+    fn visit_if_stmt(&mut self, stmt: &IfStmt) -> Self::Output;
 }
 
 pub trait VisitStmt<V: StmtVisitor> {
@@ -58,6 +63,7 @@ pub enum Stmt {
     Expr(ExprStmt),
     Print(PrintStmt),
     Block(BlockStmt),
+    If(IfStmt),
 }
 
 impl Spanned for Stmt {
@@ -67,6 +73,7 @@ impl Spanned for Stmt {
             Self::Expr(stmt) => stmt.span_start(),
             Self::Print(stmt) => stmt.span_start(),
             Self::Block(stmt) => stmt.span_start(),
+            Self::If(stmt) => stmt.span_start(),
         }
     }
 
@@ -76,6 +83,7 @@ impl Spanned for Stmt {
             Self::Expr(stmt) => stmt.span_end(),
             Self::Print(stmt) => stmt.span_end(),
             Self::Block(stmt) => stmt.span_end(),
+            Self::If(stmt) => stmt.span_end(),
         }
     }
 }
@@ -87,6 +95,7 @@ impl<V: StmtVisitor> VisitStmt<V> for Stmt {
             Self::Expr(stmt) => stmt.accept(visitor),
             Self::Print(stmt) => stmt.accept(visitor),
             Self::Block(stmt) => stmt.accept(visitor),
+            Self::If(stmt) => stmt.accept(visitor),
         }
     }
 }
@@ -176,5 +185,32 @@ impl Spanned for BlockStmt {
 impl<V: StmtVisitor> VisitStmt<V> for BlockStmt {
     fn accept(&self, visitor: &mut V) -> V::Output {
         visitor.visit_block_stmt(self)
+    }
+}
+
+pub struct IfStmt {
+    pub if_: Token,
+    pub group: GroupingExpr,
+    pub then: Box<Stmt>,
+    pub else_: Option<(Token, Box<Stmt>)>,
+}
+
+impl Spanned for IfStmt {
+    fn span_start(&self) -> usize {
+        self.if_.span_start()
+    }
+
+    fn span_end(&self) -> usize {
+        if let Some((_, stmt)) = &self.else_ {
+            stmt.span_end()
+        } else {
+            self.then.span_end()
+        }
+    }
+}
+
+impl<V: StmtVisitor> VisitStmt<V> for IfStmt {
+    fn accept(&self, visitor: &mut V) -> V::Output {
+        visitor.visit_if_stmt(self)
     }
 }

@@ -8,8 +8,8 @@ use crate::{
     ast::{
         expr::{Expr, VisitExpr},
         stmt::{
-            BlockStmt, DeclStmt, ExprStmt, PrintStmt, Program, StmtVisitor,
-            VisitStmt as _,
+            BlockStmt, DeclStmt, ExprStmt, IfStmt, PrintStmt, Program,
+            StmtVisitor, VisitStmt as _,
         },
     },
     interpreter::eval::Value,
@@ -135,5 +135,16 @@ impl StmtVisitor for Interpreter {
 
         self.environment.pop();
         result
+    }
+
+    fn visit_if_stmt(&mut self, stmt: &IfStmt) -> Self::Output {
+        let cond = self.eval_boolean(&stmt.group.inner)?;
+        if cond {
+            stmt.then.accept(self)?;
+        } else if let Some((_, else_)) = &stmt.else_ {
+            else_.accept(self)?;
+        }
+
+        Ok(())
     }
 }

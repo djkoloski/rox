@@ -85,7 +85,7 @@ impl<'s> Context<'s> {
                 "",
                 "",
                 width = width as usize,
-                column = start.column,
+                column = end.column,
             )?;
         }
 

@@ -6,7 +6,10 @@ use crate::{
             AssignExpr, BinaryExpr, Expr, GroupingExpr, LiteralExpr, UnaryExpr,
             VariableExpr,
         },
-        stmt::{BlockStmt, DeclStmt, ExprStmt, PrintStmt, Program, Repl, Stmt},
+        stmt::{
+            BlockStmt, DeclStmt, ExprStmt, IfStmt, PrintStmt, Program, Repl,
+            Stmt,
+        },
     },
     diagnostic::{Context, Diagnostic},
     scanner::{Token, TokenKind},
@@ -20,6 +23,7 @@ pub enum ParseError {
     UnterminatedStatement { stmt: Span, next: Span },
     UnterminatedBlock(Span),
     ExpectedIdent { stmt: Span, next: Span },
+    ExpectedLeftParen(Span),
     InvalidAssignmentTarget(Span),
 }
 
@@ -78,6 +82,14 @@ impl Diagnostic for ParseError {
                          instead of a valid identifier",
                         next.get(c.source())
                     ),
+                )?;
+            }
+            Self::ExpectedLeftParen(span) => {
+                c.error(f, format_args!("expected grouped expression"))?;
+                c.span(
+                    *span,
+                    f,
+                    format_args!("expected a left parenthesis here"),
                 )?;
             }
             Self::InvalidAssignmentTarget(span) => {
@@ -163,9 +175,10 @@ impl Parser {
 
     fn repl(&mut self) -> Option<Repl> {
         match self.peek().kind {
-            TokenKind::Var => Some(Repl::Stmt(self.decl_stmt()?)),
-            TokenKind::Print => Some(Repl::Stmt(self.print_stmt()?)),
-            TokenKind::LeftBrace => Some(Repl::Stmt(self.block_stmt()?)),
+            TokenKind::Var
+            | TokenKind::Print
+            | TokenKind::LeftBrace
+            | TokenKind::If => Some(Repl::Stmt(self.declaration()?)),
             _ => Some(Repl::Expr(self.expression()?)),
         }
     }
@@ -222,10 +235,31 @@ impl Parser {
 
     fn statement(&mut self) -> Option<Stmt> {
         match self.peek().kind {
+            TokenKind::If => self.if_stmt(),
             TokenKind::Print => self.print_stmt(),
             TokenKind::LeftBrace => self.block_stmt(),
             _ => self.expr_stmt(),
         }
+    }
+
+    fn if_stmt(&mut self) -> Option<Stmt> {
+        let if_ = self.next();
+
+        let group = self.grouped()?;
+        let then = self.statement()?;
+
+        let mut else_ = None;
+        if let Some(else_token) = self.expect(|k| matches!(k, TokenKind::Else))
+        {
+            else_ = Some((else_token, Box::new(self.statement()?)));
+        }
+
+        Some(Stmt::If(IfStmt {
+            if_,
+            group,
+            then: Box::new(then),
+            else_,
+        }))
     }
 
     fn print_stmt(&mut self) -> Option<Stmt> {
@@ -370,43 +404,44 @@ impl Parser {
             | TokenKind::Nil => {
                 Some(Expr::Literal(LiteralExpr { token: self.next() }))
             }
-            TokenKind::LeftParen => {
-                let lparen = self.next();
-
-                let Some(inner) = self.expression() else {
-                    self.synchronize(|kind| {
-                        matches!(kind, TokenKind::RightParen)
-                    });
-                    return None;
-                };
-
-                match self.peek().kind {
-                    TokenKind::RightParen => {
-                        Some(Expr::Grouping(GroupingExpr {
-                            lparen,
-                            inner: Box::new(inner),
-                            rparen: self.next(),
-                        }))
-                    }
-                    _ => {
-                        self.errors.push(ParseError::UnterminatedGroup(
-                            Span::across(&lparen, &inner),
-                        ));
-
-                        self.synchronize(|kind| {
-                            matches!(kind, TokenKind::RightParen)
-                        });
-
-                        None
-                    }
-                }
-            }
+            TokenKind::LeftParen => self.grouped().map(Expr::Grouping),
             TokenKind::Identifier(_) => {
                 Some(Expr::Variable(VariableExpr { ident: self.next() }))
             }
             _ => {
                 self.errors
                     .push(ParseError::ExpectedExpression(self.peek().span));
+                None
+            }
+        }
+    }
+
+    fn grouped(&mut self) -> Option<GroupingExpr> {
+        let Some(lparen) = self.expect(|k| matches!(k, TokenKind::LeftParen))
+        else {
+            self.errors
+                .push(ParseError::ExpectedLeftParen(self.peek().span));
+            return None;
+        };
+
+        let Some(inner) = self.expression() else {
+            self.synchronize(|kind| matches!(kind, TokenKind::RightParen));
+            return None;
+        };
+
+        match self.peek().kind {
+            TokenKind::RightParen => Some(GroupingExpr {
+                lparen,
+                inner: Box::new(inner),
+                rparen: self.next(),
+            }),
+            _ => {
+                self.errors.push(ParseError::UnterminatedGroup(Span::across(
+                    &lparen, &inner,
+                )));
+
+                self.synchronize(|kind| matches!(kind, TokenKind::RightParen));
+
                 None
             }
         }

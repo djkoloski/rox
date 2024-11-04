@@ -50,7 +50,10 @@ impl Value {
 
 impl Interpreter {
     #[allow(dead_code)]
-    fn eval_boolean(&mut self, expr: &Expr) -> Result<bool, InterpretError> {
+    pub fn eval_boolean(
+        &mut self,
+        expr: &Expr,
+    ) -> Result<bool, InterpretError> {
         match self.eval(expr)? {
             Value::Bool(b) => Ok(b),
             actual => Err(InterpretError::ExpectedBoolean {
@@ -60,7 +63,7 @@ impl Interpreter {
         }
     }
 
-    fn eval_number(&mut self, expr: &Expr) -> Result<f64, InterpretError> {
+    pub fn eval_number(&mut self, expr: &Expr) -> Result<f64, InterpretError> {
         match self.eval(expr)? {
             Value::Number(n) => Ok(n),
             actual => Err(InterpretError::ExpectedNumber {
