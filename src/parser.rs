@@ -6,7 +6,7 @@ use crate::{
             AssignExpr, BinaryExpr, Expr, GroupingExpr, LiteralExpr, UnaryExpr,
             VariableExpr,
         },
-        stmt::{BlockStmt, DeclStmt, ExprStmt, PrintStmt, Program, Stmt},
+        stmt::{BlockStmt, DeclStmt, ExprStmt, PrintStmt, Program, Repl, Stmt},
     },
     diagnostic::{Context, Diagnostic},
     scanner::{Token, TokenKind},
@@ -114,6 +114,10 @@ impl Parser {
         self.program()
     }
 
+    pub fn parse_repl(&mut self) -> Option<Repl> {
+        self.repl()
+    }
+
     fn peek(&self) -> &Token {
         self.tokens.last().unwrap()
     }
@@ -155,6 +159,15 @@ impl Parser {
             stmts,
             eof: self.next(),
         })
+    }
+
+    fn repl(&mut self) -> Option<Repl> {
+        match self.peek().kind {
+            TokenKind::Var => Some(Repl::Stmt(self.decl_stmt()?)),
+            TokenKind::Print => Some(Repl::Stmt(self.print_stmt()?)),
+            TokenKind::LeftBrace => Some(Repl::Stmt(self.block_stmt()?)),
+            _ => Some(Repl::Expr(self.expression()?)),
+        }
     }
 
     fn declaration(&mut self) -> Option<Stmt> {

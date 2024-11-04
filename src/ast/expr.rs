@@ -168,6 +168,7 @@ impl<V: ExprVisitor> VisitExpr<V> for VariableExpr {
 
 pub struct AssignExpr {
     pub ident: Token,
+    #[allow(dead_code)]
     pub equal: Token,
     pub expr: Box<Expr>,
 }

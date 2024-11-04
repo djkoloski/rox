@@ -32,6 +32,27 @@ impl Spanned for Program {
     }
 }
 
+pub enum Repl {
+    Stmt(Stmt),
+    Expr(Expr),
+}
+
+impl Spanned for Repl {
+    fn span_start(&self) -> usize {
+        match self {
+            Self::Stmt(stmt) => stmt.span_start(),
+            Self::Expr(expr) => expr.span_start(),
+        }
+    }
+
+    fn span_end(&self) -> usize {
+        match self {
+            Self::Stmt(stmt) => stmt.span_end(),
+            Self::Expr(expr) => expr.span_end(),
+        }
+    }
+}
+
 pub enum Stmt {
     Decl(DeclStmt),
     Expr(ExprStmt),

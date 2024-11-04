@@ -18,6 +18,7 @@ use std::{
 };
 
 use crate::{
+    ast::stmt::{Repl, VisitStmt as _},
     diagnostic::{Context, Diagnostic},
     interpreter::Interpreter,
     parser::Parser,
@@ -49,8 +50,38 @@ pub enum Status {
 
 pub fn run_file(path: &Path) -> Result<Status, Error> {
     let source = fs::read_to_string(path)?;
+
+    let mut scanner = Scanner::new(&source);
+    let tokens = scanner.scan_tokens();
+
+    if !scanner.errors.is_empty() {
+        for error in &scanner.errors {
+            emit(&source, error);
+        }
+    }
+
+    let mut parser = Parser::new(tokens);
+    let program = parser.parse();
+    if !parser.errors.is_empty() {
+        for error in &parser.errors {
+            emit(&source, error);
+        }
+    }
+
+    if !scanner.errors.is_empty()
+        || !parser.errors.is_empty()
+        || program.is_none()
+    {
+        return Ok(Status::CompilerError);
+    }
+
     let mut interpreter = Interpreter::new();
-    Ok(run(&mut interpreter, &source))
+    if let Err(error) = interpreter.interpret(&program.unwrap()) {
+        emit(&source, &error);
+        Ok(Status::RuntimeError)
+    } else {
+        Ok(Status::Ok)
+    }
 }
 
 pub fn run_prompt() -> Result<(), Error> {
@@ -65,44 +96,47 @@ pub fn run_prompt() -> Result<(), Error> {
         if eof || line.contains('\u{4}') {
             break;
         }
-        run(&mut interpreter, line.trim_end());
+
+        let mut scanner = Scanner::new(&line);
+        let tokens = scanner.scan_tokens();
+
+        if !scanner.errors.is_empty() {
+            for error in &scanner.errors {
+                emit(&line, error);
+            }
+        }
+
+        let mut parser = Parser::new(tokens);
+        let repl = parser.parse_repl();
+        if !parser.errors.is_empty() {
+            for error in &parser.errors {
+                emit(&line, error);
+            }
+        }
+
+        if !scanner.errors.is_empty()
+            || !parser.errors.is_empty()
+            || repl.is_none()
+        {
+            continue;
+        }
+
+        match &repl.unwrap() {
+            Repl::Expr(expr) => match interpreter.eval(expr) {
+                Ok(value) => println!("{value}"),
+                Err(error) => emit(&line, &error),
+            },
+            Repl::Stmt(stmt) => {
+                if let Err(error) = stmt.accept(&mut interpreter) {
+                    emit(&line, &error);
+                }
+            }
+        }
+
         println!();
     }
 
     Ok(())
-}
-
-pub fn run(interpreter: &mut Interpreter, source: &str) -> Status {
-    let mut scanner = Scanner::new(source);
-    let tokens = scanner.scan_tokens();
-
-    if !scanner.errors.is_empty() {
-        for error in &scanner.errors {
-            emit(source, error);
-        }
-    }
-
-    let mut parser = Parser::new(tokens);
-    let program = parser.parse();
-    if !parser.errors.is_empty() {
-        for error in &parser.errors {
-            emit(source, error);
-        }
-    }
-
-    if !scanner.errors.is_empty()
-        || !parser.errors.is_empty()
-        || program.is_none()
-    {
-        return Status::CompilerError;
-    }
-
-    if let Err(error) = interpreter.interpret(&program.unwrap()) {
-        emit(source, &error);
-        Status::RuntimeError
-    } else {
-        Status::Ok
-    }
 }
 
 fn emit<T: Diagnostic>(source: &str, diagnostic: &T) {
