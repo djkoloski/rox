@@ -1,23 +1,12 @@
-//! Rox language interpreter
-
-#![deny(unsafe_op_in_unsafe_fn)]
-
-mod ast;
-mod diagnostic;
-mod interpreter;
-mod parser;
-mod scanner;
-mod span;
-
 use std::{
     env::args_os,
     fs,
-    io::{stdin, stdout, Error, Write as _},
+    io::{self, Write as _},
     path::Path,
     process::exit,
 };
 
-use crate::{
+use rox::{
     ast::stmt::{Repl, VisitStmt as _},
     diagnostic::{Context, Diagnostic},
     interpreter::Interpreter,
@@ -25,30 +14,58 @@ use crate::{
     scanner::Scanner,
 };
 
-fn main() -> Result<(), Error> {
-    let mut args = args_os();
-    let status = match args.len() {
-        1 => {
-            run_prompt()?;
-            Status::Ok
+enum Error {
+    Compiler,
+    Runtime,
+    Io(io::Error),
+}
+
+impl Error {
+    fn emit(&self) {
+        if let Self::Io(e) = self {
+            eprintln!("IO error: {e}");
         }
+    }
+
+    fn status(&self) -> i32 {
+        match self {
+            Self::Compiler => 64,
+            Self::Runtime => 65,
+            Self::Io(_) => 66,
+        }
+    }
+}
+
+impl From<io::Error> for Error {
+    fn from(value: io::Error) -> Self {
+        Self::Io(value)
+    }
+}
+
+fn main() {
+    if let Err(e) = cli() {
+        e.emit();
+        exit(e.status())
+    } else {
+        exit(0);
+    }
+}
+
+fn cli() -> Result<(), Error> {
+    let mut args = args_os();
+    match args.len() {
+        1 => run_prompt()?,
         2 => run_file(Path::new(&args.nth(1).unwrap()))?,
         _ => {
             eprintln!("Usage: rox [script]");
-            Status::CompilerError
+            return Err(Error::Compiler);
         }
-    };
+    }
 
-    exit(status as i32);
+    Ok(())
 }
 
-pub enum Status {
-    Ok = 0,
-    CompilerError = 64,
-    RuntimeError = 65,
-}
-
-pub fn run_file(path: &Path) -> Result<Status, Error> {
+fn run_file(path: &Path) -> Result<(), Error> {
     let source = fs::read_to_string(path)?;
 
     let mut scanner = Scanner::new(&source);
@@ -72,27 +89,27 @@ pub fn run_file(path: &Path) -> Result<Status, Error> {
         || !parser.errors.is_empty()
         || program.is_none()
     {
-        return Ok(Status::CompilerError);
+        return Err(Error::Compiler);
     }
 
     let mut interpreter = Interpreter::new();
     if let Err(error) = interpreter.interpret(&program.unwrap()) {
         emit(&source, &error);
-        Ok(Status::RuntimeError)
-    } else {
-        Ok(Status::Ok)
+        return Err(Error::Runtime);
     }
+
+    Ok(())
 }
 
-pub fn run_prompt() -> Result<(), Error> {
+fn run_prompt() -> Result<(), Error> {
     let mut interpreter = Interpreter::new();
 
     loop {
         print!("> ");
-        stdout().flush()?;
+        io::stdout().flush()?;
 
         let mut line = String::new();
-        let eof = stdin().read_line(&mut line)? == 0;
+        let eof = io::stdin().read_line(&mut line)? == 0;
         if eof || line.contains('\u{4}') {
             break;
         }

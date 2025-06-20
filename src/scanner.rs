@@ -88,7 +88,6 @@ impl<'a> Scanner<'a> {
         loop {
             self.start = self.current;
             let Some(c) = self.advance() else {
-                result.push(self.token(TokenKind::Eof));
                 break;
             };
 
@@ -96,6 +95,8 @@ impl<'a> Scanner<'a> {
                 result.push(token);
             }
         }
+
+        result.push(self.token(TokenKind::Eof));
 
         result
     }
@@ -168,9 +169,9 @@ impl<'a> Scanner<'a> {
 
     fn line_comment(&mut self) {
         self.advance();
-        while let Some(next) = self.peek() {
-            if next != b'\n' {
-                self.advance();
+        while let Some(next) = self.advance() {
+            if next == b'\n' {
+                break;
             }
         }
     }

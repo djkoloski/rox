@@ -71,3 +71,23 @@ pub trait Spanned {
         Span::scan(self.span_start(), self.span_end())
     }
 }
+
+impl<T: Spanned + ?Sized> Spanned for Box<T> {
+    fn span_start(&self) -> usize {
+        T::span_start(self)
+    }
+
+    fn span_end(&self) -> usize {
+        T::span_end(self)
+    }
+}
+
+impl<T0: Spanned, T1: Spanned> Spanned for (T0, T1) {
+    fn span_start(&self) -> usize {
+        self.0.span_start()
+    }
+
+    fn span_end(&self) -> usize {
+        self.1.span_end()
+    }
+}
