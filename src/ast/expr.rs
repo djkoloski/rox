@@ -1,4 +1,4 @@
-use crate::scanner::Token;
+use crate::{ast::decoration::Decoration, scanner::Token};
 
 pub trait ExprVisitor {
     type Output;
@@ -57,11 +57,13 @@ ast_node! {
 
     #[visit(VisitExpr, ExprVisitor::visit_variable_expr)]
     pub struct VariableExpr {
+        pub decoration: Decoration,
         pub ident: Token,
     }
 
     #[visit(VisitExpr, ExprVisitor::visit_assign_expr)]
     pub struct AssignExpr {
+        pub decoration: Decoration,
         pub ident: Token,
         pub equal: Token,
         pub expr: Box<Expr>,

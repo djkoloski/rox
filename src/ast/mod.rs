@@ -111,6 +111,13 @@ macro_rules! ast_node {
     (@span_start $self:ident) => {};
     (@span_start
         $self:ident
+        $first:ident: Decoration,
+        $($rest:ident: $rest_ty:ident,)*
+    ) => {
+        ast_node!(@span_start $self $($rest: $rest_ty,)*);
+    };
+    (@span_start
+        $self:ident
         $first:ident: Option,
         $($rest:ident: $rest_ty:ident,)*
     ) => {
@@ -137,6 +144,13 @@ macro_rules! ast_node {
         return $crate::span::Spanned::span_start(&$self.$first);
     };
     (@span_end $self:ident) => {};
+    (@span_end
+        $self:ident
+        $first:ident: Decoration,
+        $($rest:ident: $rest_ty:ident,)*
+    ) => {
+        ast_node!(@span_end $self $($rest: $rest_ty,)*);
+    };
     (@span_end
         $self:ident
         $first:ident: Option,
@@ -167,5 +181,6 @@ macro_rules! ast_node {
     };
 }
 
+pub mod decoration;
 pub mod expr;
 pub mod stmt;

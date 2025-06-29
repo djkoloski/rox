@@ -2,6 +2,7 @@ use core::fmt;
 
 use crate::{
     ast::{
+        decoration::Decorator,
         expr::{
             AssignExpr, BinaryExpr, Expr, GroupingExpr, LiteralExpr, UnaryExpr,
             VariableExpr,
@@ -110,6 +111,7 @@ impl Diagnostic for ParseError {
 
 pub struct Parser {
     tokens: Vec<Token>,
+    decorator: Decorator,
     pub errors: Vec<ParseError>,
 }
 
@@ -118,6 +120,7 @@ impl Parser {
         tokens.reverse();
         Self {
             tokens,
+            decorator: Decorator::new(),
             errors: Vec::new(),
         }
     }
@@ -330,8 +333,9 @@ impl Parser {
         if let Some(equal) = self.expect(|k| matches!(k, TokenKind::Equal)) {
             let value = self.assignment()?;
 
-            if let Expr::Variable(VariableExpr { ident }) = expr {
+            if let Expr::Variable(VariableExpr { decoration, ident }) = expr {
                 Some(Expr::Assign(AssignExpr {
+                    decoration,
                     ident,
                     equal,
                     expr: Box::new(value),
@@ -405,9 +409,10 @@ impl Parser {
                 Some(Expr::Literal(LiteralExpr { token: self.next() }))
             }
             TokenKind::LeftParen => self.grouped().map(Expr::Grouping),
-            TokenKind::Identifier(_) => {
-                Some(Expr::Variable(VariableExpr { ident: self.next() }))
-            }
+            TokenKind::Identifier(_) => Some(Expr::Variable(VariableExpr {
+                decoration: self.decorator.decorate(),
+                ident: self.next(),
+            })),
             _ => {
                 self.errors
                     .push(ParseError::ExpectedExpression(self.peek().span));

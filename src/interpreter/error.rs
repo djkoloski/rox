@@ -8,25 +8,12 @@ use crate::{
 
 #[derive(Debug)]
 pub enum InterpretError {
-    #[allow(dead_code)]
-    ExpectedBoolean {
-        span: Span,
-        actual: Value,
-    },
-    ExpectedNumber {
-        span: Span,
-        actual: Value,
-    },
-    ExpectedString {
-        span: Span,
-        actual: Value,
-    },
-    ExpectedNumberOrString {
-        span: Span,
-        actual: Value,
-    },
+    ExpectedBoolean { span: Span, actual: Value },
+    ExpectedNumber { span: Span, actual: Value },
+    ExpectedString { span: Span, actual: Value },
+    ExpectedNumberOrString { span: Span, actual: Value },
     DivideByZero(Span),
-    UndefinedVariable(Span),
+    UndefinedVariable { span: Span },
     UninitializedVariable(Span),
 }
 
@@ -106,15 +93,18 @@ impl Diagnostic for InterpretError {
                     format_args!("this expression evaluated to zero"),
                 )?;
             }
-            Self::UndefinedVariable(span) => {
-                c.error(f, format_args!("undefined variable"))?;
+            Self::UndefinedVariable { span } => {
+                c.error(
+                    f,
+                    format_args!(
+                        "undefined variable '{}'",
+                        span.get(c.source())
+                    ),
+                )?;
                 c.span(
                     *span,
                     f,
-                    format_args!(
-                        "'{}' is not defined here",
-                        span.get(c.source())
-                    ),
+                    format_args!("this variable has not been defined"),
                 )?;
             }
             Self::UninitializedVariable(span) => {

@@ -1,6 +1,8 @@
 mod error;
 mod eval;
+mod name_resolution;
 
+use core::mem::take;
 use std::collections::HashMap;
 
 pub use self::error::InterpretError;
@@ -15,28 +17,28 @@ use crate::{
             StmtVisitor, VisitStmt as _,
         },
     },
-    interpreter::eval::Value,
+    interpreter::{eval::Value, name_resolution::NameResolution},
     scanner::TokenKind,
     span::Spanned,
 };
 
-struct Scope {
-    values: HashMap<String, Value>,
+struct Scope<T> {
+    names: HashMap<String, T>,
 }
 
-impl Scope {
+impl<T> Scope<T> {
     fn new() -> Self {
         Self {
-            values: HashMap::new(),
+            names: HashMap::new(),
         }
     }
 }
 
-struct Environment {
-    scopes: Vec<Scope>,
+struct Environment<T> {
+    scopes: Vec<Scope<T>>,
 }
 
-impl Environment {
+impl<T> Environment<T> {
     fn new() -> Self {
         Self {
             scopes: vec![Scope::new()],
@@ -44,28 +46,28 @@ impl Environment {
     }
 }
 
-impl Environment {
-    fn define(&mut self, name: String, value: Value) {
-        self.scopes.last_mut().unwrap().values.insert(name, value);
+impl<T> Environment<T> {
+    fn define(&mut self, name: String, value: T) {
+        self.scopes.last_mut().unwrap().names.insert(name, value);
     }
 
-    fn get(&self, name: &str) -> Option<&Value> {
-        for scope in self.scopes.iter().rev() {
-            if let Some(v) = scope.values.get(name) {
-                return Some(v);
+    fn resolve(&self, name: &str) -> Option<usize> {
+        for (i, scope) in self.scopes.iter().rev().enumerate() {
+            if scope.names.contains_key(name) {
+                return Some(i);
             }
         }
         None
     }
 
-    fn set(&mut self, name: &str, value: Value) {
-        for scope in self.scopes.iter_mut().rev() {
-            if let Some(v) = scope.values.get_mut(name) {
-                *v = value;
-                return;
-            }
-        }
-        panic!("failed to locate variable while setting");
+    fn get(&self, name: &str, depth: usize) -> Option<&T> {
+        let index = self.scopes.len() - depth - 1;
+        self.scopes[index].names.get(name)
+    }
+
+    fn set(&mut self, name: &str, depth: usize, value: T) {
+        let index = self.scopes.len() - depth - 1;
+        *self.scopes[index].names.get_mut(name).unwrap() = value;
     }
 
     fn push(&mut self) {
@@ -78,22 +80,33 @@ impl Environment {
 }
 
 pub struct Interpreter {
-    environment: Environment,
+    values: Environment<Value>,
+    name_resolution: NameResolution,
 }
 
 impl Interpreter {
     pub fn new() -> Self {
         Self {
-            environment: Environment::new(),
+            values: Environment::new(),
+            name_resolution: NameResolution::new(),
         }
     }
 
     pub fn interpret(
         &mut self,
         program: &Program,
-    ) -> Result<(), InterpretError> {
+    ) -> Result<(), Vec<InterpretError>> {
         for stmt in &program.stmts {
-            stmt.accept(self)?;
+            stmt.accept(&mut self.name_resolution);
+        }
+
+        if !self.name_resolution.errors.is_empty() {
+            let errors = take(&mut self.name_resolution.errors);
+            return Err(errors);
+        }
+
+        for stmt in &program.stmts {
+            stmt.accept(self).map_err(|e| vec![e])?;
         }
 
         Ok(())
@@ -216,9 +229,8 @@ impl ExprVisitor for Interpreter {
         let TokenKind::Identifier(ident) = &expr.ident.kind else {
             unreachable!();
         };
-        let Some(value) = self.environment.get(ident) else {
-            return Err(InterpretError::UndefinedVariable(expr.ident.span));
-        };
+        let depth = self.name_resolution.get(expr.decoration).unwrap();
+        let value = self.values.get(ident, depth).unwrap();
         if matches!(value, Value::Uninitialized) {
             return Err(InterpretError::UninitializedVariable(expr.ident.span));
         }
@@ -230,11 +242,9 @@ impl ExprVisitor for Interpreter {
         let TokenKind::Identifier(ident) = &expr.ident.kind else {
             unreachable!();
         };
-        if self.environment.get(ident).is_none() {
-            return Err(InterpretError::UndefinedVariable(expr.ident.span));
-        }
+        let depth = self.name_resolution.get(expr.decoration).unwrap();
         let value = self.eval(&expr.expr)?;
-        self.environment.set(ident, value.clone());
+        self.values.set(ident, depth, value.clone());
 
         Ok(value)
     }
@@ -252,7 +262,7 @@ impl StmtVisitor for Interpreter {
         let TokenKind::Identifier(ident) = &stmt.ident.kind else {
             unreachable!()
         };
-        self.environment.define(ident.clone(), value);
+        self.values.define(ident.clone(), value);
         Ok(())
     }
 
@@ -269,7 +279,7 @@ impl StmtVisitor for Interpreter {
 
     fn visit_block_stmt(&mut self, stmt: &BlockStmt) -> Self::Output {
         let mut result = Ok(());
-        self.environment.push();
+        self.values.push();
 
         for stmt in &stmt.stmts {
             if let Err(e) = stmt.accept(self) {
@@ -278,7 +288,7 @@ impl StmtVisitor for Interpreter {
             }
         }
 
-        self.environment.pop();
+        self.values.pop();
         result
     }
 

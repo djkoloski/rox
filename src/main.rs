@@ -93,8 +93,10 @@ fn run_file(path: &Path) -> Result<(), Error> {
     }
 
     let mut interpreter = Interpreter::new();
-    if let Err(error) = interpreter.interpret(&program.unwrap()) {
-        emit(&source, &error);
+    if let Err(errors) = interpreter.interpret(&program.unwrap()) {
+        for error in errors {
+            emit(&source, &error);
+        }
         return Err(Error::Runtime);
     }
 
