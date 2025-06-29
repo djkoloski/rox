@@ -13,7 +13,7 @@ use crate::{
         },
     },
     interpreter::{Environment, InterpretError},
-    scanner::TokenKind,
+    scanner::Token,
     span::Spanned as _,
 };
 
@@ -52,10 +52,10 @@ impl StmtVisitor for NameResolution {
         if let Some((_, expr)) = &stmt.assignment {
             expr.accept(self);
         }
-        let TokenKind::Identifier(name) = &stmt.ident.kind else {
+        let Token::Identifier(ident) = &stmt.ident else {
             unreachable!();
         };
-        self.names.define(name.clone(), ());
+        self.names.define(ident.value.clone(), ());
     }
 
     fn visit_expr_stmt(&mut self, stmt: &ExprStmt) -> Self::Output {
@@ -94,11 +94,11 @@ impl ExprVisitor for NameResolution {
     }
 
     fn visit_variable_expr(&mut self, expr: &VariableExpr) -> Self::Output {
-        let TokenKind::Identifier(ident) = &expr.ident.kind else {
+        let Token::Identifier(ident) = &expr.ident else {
             unreachable!();
         };
 
-        let Some(depth) = self.names.resolve(ident) else {
+        let Some(depth) = self.names.resolve(&ident.value) else {
             self.errors.push(InterpretError::UndefinedVariable {
                 span: expr.ident.span(),
             });

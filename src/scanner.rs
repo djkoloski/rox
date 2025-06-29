@@ -96,49 +96,49 @@ impl<'a> Scanner<'a> {
             }
         }
 
-        result.push(self.token(TokenKind::Eof));
+        result.push(Eof { span: self.span() }.into());
 
         result
     }
 
     fn scan_token(&mut self, c: u8) -> Option<Token> {
         Some(match c {
-            b'(' => self.token(TokenKind::LeftParen),
-            b')' => self.token(TokenKind::RightParen),
-            b'{' => self.token(TokenKind::LeftBrace),
-            b'}' => self.token(TokenKind::RightBrace),
-            b',' => self.token(TokenKind::Comma),
-            b'.' => self.token(TokenKind::Dot),
-            b'-' => self.token(TokenKind::Minus),
-            b'+' => self.token(TokenKind::Plus),
-            b';' => self.token(TokenKind::Semicolon),
-            b'*' => self.token(TokenKind::Star),
+            b'(' => LeftParen { span: self.span() }.into(),
+            b')' => RightParen { span: self.span() }.into(),
+            b'{' => LeftBrace { span: self.span() }.into(),
+            b'}' => RightBrace { span: self.span() }.into(),
+            b',' => Comma { span: self.span() }.into(),
+            b'.' => Dot { span: self.span() }.into(),
+            b'-' => Minus { span: self.span() }.into(),
+            b'+' => Plus { span: self.span() }.into(),
+            b';' => Semicolon { span: self.span() }.into(),
+            b'*' => Star { span: self.span() }.into(),
             b'!' => {
                 if self.expect(b'=') {
-                    self.token(TokenKind::BangEqual)
+                    BangEqual { span: self.span() }.into()
                 } else {
-                    self.token(TokenKind::Bang)
+                    Bang { span: self.span() }.into()
                 }
             }
             b'=' => {
                 if self.expect(b'=') {
-                    self.token(TokenKind::EqualEqual)
+                    EqualEqual { span: self.span() }.into()
                 } else {
-                    self.token(TokenKind::Equal)
+                    Equal { span: self.span() }.into()
                 }
             }
             b'<' => {
                 if self.expect(b'=') {
-                    self.token(TokenKind::LessEqual)
+                    LessEqual { span: self.span() }.into()
                 } else {
-                    self.token(TokenKind::Less)
+                    Less { span: self.span() }.into()
                 }
             }
             b'>' => {
                 if self.expect(b'=') {
-                    self.token(TokenKind::GreaterEqual)
+                    GreaterEqual { span: self.span() }.into()
                 } else {
-                    self.token(TokenKind::Greater)
+                    Greater { span: self.span() }.into()
                 }
             }
             b'/' => match self.peek()? {
@@ -150,7 +150,7 @@ impl<'a> Scanner<'a> {
                     self.block_comment();
                     return None;
                 }
-                _ => self.token(TokenKind::Slash),
+                _ => Slash { span: self.span() }.into(),
             },
             b'"' => self.string()?,
             b'0'..=b'9' => self.number()?,
@@ -209,7 +209,13 @@ impl<'a> Scanner<'a> {
             if c == b'"' {
                 let value =
                     self.source[self.start + 1..self.current - 1].to_string();
-                return Some(self.token(TokenKind::String(value)));
+                return Some(
+                    String {
+                        span: self.span(),
+                        value,
+                    }
+                    .into(),
+                );
             }
         }
 
@@ -233,7 +239,13 @@ impl<'a> Scanner<'a> {
         }
 
         match self.source[self.start..self.current].parse::<f64>() {
-            Ok(value) => Some(self.token(TokenKind::Number(value))),
+            Ok(value) => Some(
+                Number {
+                    span: self.span(),
+                    value,
+                }
+                .into(),
+            ),
             Err(error) => {
                 println!(
                     "attempted to parse {}..{} (`{}`) as a float",
@@ -257,25 +269,29 @@ impl<'a> Scanner<'a> {
             self.advance();
         }
 
-        self.token(match &self.source[self.start..self.current] {
-            "and" => TokenKind::And,
-            "class" => TokenKind::Class,
-            "else" => TokenKind::Else,
-            "false" => TokenKind::False,
-            "for" => TokenKind::For,
-            "fun" => TokenKind::Fun,
-            "if" => TokenKind::If,
-            "nil" => TokenKind::Nil,
-            "or" => TokenKind::Or,
-            "print" => TokenKind::Print,
-            "return" => TokenKind::Return,
-            "super" => TokenKind::Super,
-            "this" => TokenKind::This,
-            "true" => TokenKind::True,
-            "var" => TokenKind::Var,
-            "while" => TokenKind::While,
-            ident => TokenKind::Identifier(ident.to_string()),
-        })
+        match &self.source[self.start..self.current] {
+            "and" => And { span: self.span() }.into(),
+            "class" => Class { span: self.span() }.into(),
+            "else" => Else { span: self.span() }.into(),
+            "false" => False { span: self.span() }.into(),
+            "for" => For { span: self.span() }.into(),
+            "fun" => Fun { span: self.span() }.into(),
+            "if" => If { span: self.span() }.into(),
+            "nil" => Nil { span: self.span() }.into(),
+            "or" => Or { span: self.span() }.into(),
+            "print" => Print { span: self.span() }.into(),
+            "return" => Return { span: self.span() }.into(),
+            "super" => Super { span: self.span() }.into(),
+            "this" => This { span: self.span() }.into(),
+            "true" => True { span: self.span() }.into(),
+            "var" => Var { span: self.span() }.into(),
+            "while" => While { span: self.span() }.into(),
+            ident => Identifier {
+                span: self.span(),
+                value: ident.to_string(),
+            }
+            .into(),
+        }
     }
 
     fn peek(&self) -> Option<u8> {
@@ -306,77 +322,104 @@ impl<'a> Scanner<'a> {
         Span::scan(self.start, self.current)
     }
 
-    fn token(&mut self, kind: TokenKind) -> Token {
-        Token {
-            kind,
-            span: self.span(),
-        }
-    }
-
     fn error(&mut self, e: ScanError) {
         self.errors.push(e);
     }
 }
 
-#[derive(Debug)]
-pub struct Token {
-    pub kind: TokenKind,
-    pub span: Span,
+macro_rules! token {
+    (
+        pub enum $name:ident {
+            $($variant:ident $(($value:ty))?),* $(,)?
+        }
+    ) => {
+        $(
+            #[derive(Debug)]
+            pub struct $variant {
+                pub span: Span,
+                $(pub value: $value,)*
+            }
+
+            impl Spanned for $variant {
+                fn span_start(&self) -> usize {
+                    self.span.start()
+                }
+
+                fn span_end(&self) -> usize {
+                    self.span.end()
+                }
+            }
+        )*
+
+        #[derive(Debug)]
+        pub enum $name {
+            $($variant($variant),)*
+        }
+
+        $(
+            impl From<$variant> for $name {
+                fn from(token: $variant) -> Self {
+                    Self::$variant(token)
+                }
+            }
+        )*
+
+        impl Spanned for $name {
+            fn span_start(&self) -> usize {
+                match self {
+                    $(Self::$variant(token) => token.span_start(),)*
+                }
+            }
+
+            fn span_end(&self) -> usize {
+                match self {
+                    $(Self::$variant(token) => token.span_end(),)*
+                }
+            }
+        }
+    }
 }
 
-impl Spanned for Token {
-    fn span_start(&self) -> usize {
-        self.span.start()
+token! {
+    pub enum Token {
+        LeftParen,
+        RightParen,
+        LeftBrace,
+        RightBrace,
+        Comma,
+        Dot,
+        Minus,
+        Plus,
+        Semicolon,
+        Slash,
+        Star,
+        Bang,
+        BangEqual,
+        Equal,
+        EqualEqual,
+        Greater,
+        GreaterEqual,
+        Less,
+        LessEqual,
+        Identifier(std::string::String),
+        String(std::string::String),
+        Number(f64),
+        And,
+        Class,
+        Else,
+        False,
+        Fun,
+        For,
+        If,
+        Nil,
+        Or,
+        Print,
+        Return,
+        Super,
+        This,
+        True,
+        Var,
+        While,
+        Eof,
     }
-
-    fn span_end(&self) -> usize {
-        self.span.end()
-    }
-
-    fn span(&self) -> Span {
-        self.span
-    }
-}
-
-#[derive(Debug)]
-pub enum TokenKind {
-    LeftParen,
-    RightParen,
-    LeftBrace,
-    RightBrace,
-    Comma,
-    Dot,
-    Minus,
-    Plus,
-    Semicolon,
-    Slash,
-    Star,
-    Bang,
-    BangEqual,
-    Equal,
-    EqualEqual,
-    Greater,
-    GreaterEqual,
-    Less,
-    LessEqual,
-    Identifier(String),
-    String(String),
-    Number(f64),
-    And,
-    Class,
-    Else,
-    False,
-    Fun,
-    For,
-    If,
-    Nil,
-    Or,
-    Print,
-    Return,
-    Super,
-    This,
-    True,
-    Var,
-    While,
-    Eof,
 }

@@ -13,7 +13,7 @@ use crate::{
         },
     },
     diagnostic::{Context, Diagnostic},
-    scanner::{Token, TokenKind},
+    scanner::Token,
     span::{Span, Spanned as _},
 };
 
@@ -139,9 +139,9 @@ impl Parser {
 
     fn expect(
         &mut self,
-        matches: impl FnOnce(&TokenKind) -> bool,
+        matches: impl FnOnce(&Token) -> bool,
     ) -> Option<Token> {
-        if matches(&self.peek().kind) {
+        if matches(self.peek()) {
             Some(self.next())
         } else {
             None
@@ -156,14 +156,14 @@ impl Parser {
         let mut stmts = Vec::new();
 
         loop {
-            match self.peek().kind {
-                TokenKind::Eof => break,
+            match self.peek() {
+                Token::Eof(_) => break,
                 _ => {
                     if let Some(stmt) = self.declaration() {
                         stmts.push(stmt);
                     } else {
-                        self.synchronize(|kind| {
-                            matches!(kind, TokenKind::Semicolon)
+                        self.synchronize(|token| {
+                            matches!(token, Token::Semicolon(_))
                         });
                     }
                 }
@@ -177,35 +177,34 @@ impl Parser {
     }
 
     fn repl(&mut self) -> Option<Repl> {
-        match self.peek().kind {
-            TokenKind::Var
-            | TokenKind::Print
-            | TokenKind::LeftBrace
-            | TokenKind::If => Some(Repl::Stmt(self.declaration()?)),
+        match self.peek() {
+            Token::Var(_)
+            | Token::Print(_)
+            | Token::LeftBrace(_)
+            | Token::If(_) => Some(Repl::Stmt(self.declaration()?)),
             _ => Some(Repl::Expr(self.expression()?)),
         }
     }
 
     fn declaration(&mut self) -> Option<Stmt> {
-        match self.peek().kind {
-            TokenKind::Var => self.decl_stmt(),
+        match self.peek() {
+            Token::Var(_) => self.decl_stmt(),
             _ => self.statement(),
         }
     }
 
     fn decl_stmt(&mut self) -> Option<Stmt> {
         let var = self.next();
-        let Some(ident) =
-            self.expect(|k| matches!(k, TokenKind::Identifier(_)))
+        let Some(ident) = self.expect(|k| matches!(k, Token::Identifier(_)))
         else {
             self.errors.push(ParseError::ExpectedIdent {
                 stmt: var.span(),
-                next: self.peek().span,
+                next: self.peek().span(),
             });
             return None;
         };
 
-        let assignment = if matches!(self.peek().kind, TokenKind::Equal) {
+        let assignment = if matches!(self.peek(), Token::Equal(_)) {
             let equal = self.next();
             let expr = self.expression()?;
             Some((equal, expr))
@@ -213,7 +212,7 @@ impl Parser {
             None
         };
 
-        let Some(semi) = self.expect(|k| matches!(k, TokenKind::Semicolon))
+        let Some(semi) = self.expect(|k| matches!(k, Token::Semicolon(_)))
         else {
             let stmt = if let Some((_, expr)) = &assignment {
                 Span::across(&var, expr)
@@ -223,7 +222,7 @@ impl Parser {
 
             self.errors.push(ParseError::UnterminatedStatement {
                 stmt,
-                next: self.peek().span,
+                next: self.peek().span(),
             });
             return None;
         };
@@ -237,10 +236,10 @@ impl Parser {
     }
 
     fn statement(&mut self) -> Option<Stmt> {
-        match self.peek().kind {
-            TokenKind::If => self.if_stmt(),
-            TokenKind::Print => self.print_stmt(),
-            TokenKind::LeftBrace => self.block_stmt(),
+        match self.peek() {
+            Token::If(_) => self.if_stmt(),
+            Token::Print(_) => self.print_stmt(),
+            Token::LeftBrace(_) => self.block_stmt(),
             _ => self.expr_stmt(),
         }
     }
@@ -252,8 +251,7 @@ impl Parser {
         let then = self.statement()?;
 
         let mut else_ = None;
-        if let Some(else_token) = self.expect(|k| matches!(k, TokenKind::Else))
-        {
+        if let Some(else_token) = self.expect(|k| matches!(k, Token::Else(_))) {
             else_ = Some((else_token, Box::new(self.statement()?)));
         }
 
@@ -268,11 +266,11 @@ impl Parser {
     fn print_stmt(&mut self) -> Option<Stmt> {
         let print = self.next();
         let expr = self.expression()?;
-        let Some(semi) = self.expect(|k| matches!(k, TokenKind::Semicolon))
+        let Some(semi) = self.expect(|k| matches!(k, Token::Semicolon(_)))
         else {
             self.errors.push(ParseError::UnterminatedStatement {
                 stmt: Span::across(&print, &expr),
-                next: self.peek().span,
+                next: self.peek().span(),
             });
             return None;
         };
@@ -285,9 +283,9 @@ impl Parser {
         let mut stmts = Vec::new();
 
         loop {
-            match self.peek().kind {
-                TokenKind::RightBrace => break,
-                TokenKind::Eof => {
+            match self.peek() {
+                Token::RightBrace(_) => break,
+                Token::Eof(_) => {
                     let span = if stmts.is_empty() {
                         lbrace.span()
                     } else {
@@ -311,11 +309,11 @@ impl Parser {
 
     fn expr_stmt(&mut self) -> Option<Stmt> {
         let expr = self.expression()?;
-        let Some(semi) = self.expect(|k| matches!(k, TokenKind::Semicolon))
+        let Some(semi) = self.expect(|k| matches!(k, Token::Semicolon(_)))
         else {
             self.errors.push(ParseError::UnterminatedStatement {
                 stmt: expr.span(),
-                next: self.peek().span,
+                next: self.peek().span(),
             });
             return None;
         };
@@ -330,7 +328,7 @@ impl Parser {
     fn assignment(&mut self) -> Option<Expr> {
         let expr = self.equality()?;
 
-        if let Some(equal) = self.expect(|k| matches!(k, TokenKind::Equal)) {
+        if let Some(equal) = self.expect(|k| matches!(k, Token::Equal(_))) {
             let value = self.assignment()?;
 
             if let Expr::Variable(VariableExpr { decoration, ident }) = expr {
@@ -352,7 +350,7 @@ impl Parser {
 
     fn equality(&mut self) -> Option<Expr> {
         self.parse_left_binary(
-            |kind| matches!(kind, TokenKind::BangEqual | TokenKind::EqualEqual),
+            |kind| matches!(kind, Token::BangEqual(_) | Token::EqualEqual(_)),
             |this| this.comparison(),
         )
     }
@@ -362,10 +360,10 @@ impl Parser {
             |kind| {
                 matches!(
                     kind,
-                    TokenKind::Greater
-                        | TokenKind::GreaterEqual
-                        | TokenKind::Less
-                        | TokenKind::LessEqual
+                    Token::Greater(_)
+                        | Token::GreaterEqual(_)
+                        | Token::Less(_)
+                        | Token::LessEqual(_)
                 )
             },
             |this| this.term(),
@@ -374,20 +372,20 @@ impl Parser {
 
     fn term(&mut self) -> Option<Expr> {
         self.parse_left_binary(
-            |kind| matches!(kind, TokenKind::Minus | TokenKind::Plus),
+            |kind| matches!(kind, Token::Minus(_) | Token::Plus(_)),
             |this| this.factor(),
         )
     }
 
     fn factor(&mut self) -> Option<Expr> {
         self.parse_left_binary(
-            |kind| matches!(kind, TokenKind::Slash | TokenKind::Star),
+            |kind| matches!(kind, Token::Slash(_) | Token::Star(_)),
             |this| this.unary(),
         )
     }
 
     fn unary(&mut self) -> Option<Expr> {
-        if matches!(self.peek().kind, TokenKind::Bang | TokenKind::Minus) {
+        if matches!(self.peek(), Token::Bang(_) | Token::Minus(_)) {
             let operator = self.next();
             let inner = self.unary()?;
             Some(Expr::Unary(UnaryExpr {
@@ -400,42 +398,42 @@ impl Parser {
     }
 
     fn primary(&mut self) -> Option<Expr> {
-        match self.peek().kind {
-            TokenKind::Number(_)
-            | TokenKind::String(_)
-            | TokenKind::True
-            | TokenKind::False
-            | TokenKind::Nil => {
+        match self.peek() {
+            Token::Number(_)
+            | Token::String(_)
+            | Token::True(_)
+            | Token::False(_)
+            | Token::Nil(_) => {
                 Some(Expr::Literal(LiteralExpr { token: self.next() }))
             }
-            TokenKind::LeftParen => self.grouped().map(Expr::Grouping),
-            TokenKind::Identifier(_) => Some(Expr::Variable(VariableExpr {
+            Token::LeftParen(_) => self.grouped().map(Expr::Grouping),
+            Token::Identifier(_) => Some(Expr::Variable(VariableExpr {
                 decoration: self.decorator.decorate(),
                 ident: self.next(),
             })),
             _ => {
                 self.errors
-                    .push(ParseError::ExpectedExpression(self.peek().span));
+                    .push(ParseError::ExpectedExpression(self.peek().span()));
                 None
             }
         }
     }
 
     fn grouped(&mut self) -> Option<GroupingExpr> {
-        let Some(lparen) = self.expect(|k| matches!(k, TokenKind::LeftParen))
+        let Some(lparen) = self.expect(|k| matches!(k, Token::LeftParen(_)))
         else {
             self.errors
-                .push(ParseError::ExpectedLeftParen(self.peek().span));
+                .push(ParseError::ExpectedLeftParen(self.peek().span()));
             return None;
         };
 
         let Some(inner) = self.expression() else {
-            self.synchronize(|kind| matches!(kind, TokenKind::RightParen));
+            self.synchronize(|kind| matches!(kind, Token::RightParen(_)));
             return None;
         };
 
-        match self.peek().kind {
-            TokenKind::RightParen => Some(GroupingExpr {
+        match self.peek() {
+            Token::RightParen(_) => Some(GroupingExpr {
                 lparen,
                 inner: Box::new(inner),
                 rparen: self.next(),
@@ -445,16 +443,16 @@ impl Parser {
                     &lparen, &inner,
                 )));
 
-                self.synchronize(|kind| matches!(kind, TokenKind::RightParen));
+                self.synchronize(|kind| matches!(kind, Token::RightParen(_)));
 
                 None
             }
         }
     }
 
-    fn synchronize(&mut self, matches: impl Fn(&TokenKind) -> bool) {
-        while !matches!(self.peek().kind, TokenKind::Eof) {
-            if matches(&self.next().kind) {
+    fn synchronize(&mut self, matches: impl Fn(&Token) -> bool) {
+        while !matches!(self.peek(), Token::Eof(_)) {
+            if matches(&self.next()) {
                 break;
             }
         }
@@ -462,12 +460,12 @@ impl Parser {
 
     fn parse_left_binary(
         &mut self,
-        matches: impl Fn(&TokenKind) -> bool,
+        matches: impl Fn(&Token) -> bool,
         mut operand: impl FnMut(&mut Self) -> Option<Expr>,
     ) -> Option<Expr> {
         let mut expr = operand(self)?;
 
-        while matches(&self.peek().kind) {
+        while matches(self.peek()) {
             let operator = self.next();
             let right = operand(self)?;
             expr = Expr::Binary(BinaryExpr {

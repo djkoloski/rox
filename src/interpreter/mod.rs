@@ -18,7 +18,7 @@ use crate::{
         },
     },
     interpreter::{eval::Value, name_resolution::NameResolution},
-    scanner::TokenKind,
+    scanner::Token,
     span::Spanned,
 };
 
@@ -127,37 +127,37 @@ impl ExprVisitor for Interpreter {
     type Output = Result<Value, InterpretError>;
 
     fn visit_literal_expr(&mut self, literal: &LiteralExpr) -> Self::Output {
-        Ok(match &literal.token.kind {
-            TokenKind::Nil => Value::Nil,
-            TokenKind::True => Value::Bool(true),
-            TokenKind::False => Value::Bool(false),
-            TokenKind::Number(x) => Value::Number(*x),
-            TokenKind::String(s) => Value::String(s.clone()),
+        Ok(match &literal.token {
+            Token::Nil(_) => Value::Nil,
+            Token::True(_) => Value::Bool(true),
+            Token::False(_) => Value::Bool(false),
+            Token::Number(x) => Value::Number(x.value),
+            Token::String(s) => Value::String(s.value.clone()),
             _ => unreachable!(),
         })
     }
 
     fn visit_unary_expr(&mut self, unary: &UnaryExpr) -> Self::Output {
-        Ok(match unary.operator.kind {
-            TokenKind::Bang => {
+        Ok(match unary.operator {
+            Token::Bang(_) => {
                 Value::Bool(!self.eval(&unary.inner)?.truthiness())
             }
-            TokenKind::Minus => Value::Number(-self.eval_number(&unary.inner)?),
+            Token::Minus(_) => Value::Number(-self.eval_number(&unary.inner)?),
             _ => unreachable!(),
         })
     }
 
     fn visit_binary_expr(&mut self, binary: &BinaryExpr) -> Self::Output {
-        Ok(match binary.operator.kind {
-            TokenKind::Minus => Value::Number(
+        Ok(match binary.operator {
+            Token::Minus(_) => Value::Number(
                 self.eval_number(&binary.left)?
                     - self.eval_number(&binary.right)?,
             ),
-            TokenKind::Star => Value::Number(
+            Token::Star(_) => Value::Number(
                 self.eval_number(&binary.left)?
                     * self.eval_number(&binary.right)?,
             ),
-            TokenKind::Slash => {
+            Token::Slash(_) => {
                 let num = self.eval_number(&binary.left)?;
                 let den = self.eval_number(&binary.right)?;
                 if den == 0.0 {
@@ -167,7 +167,7 @@ impl ExprVisitor for Interpreter {
                 }
                 Value::Number(num / den)
             }
-            TokenKind::Plus => {
+            Token::Plus(_) => {
                 match (self.eval(&binary.left)?, self.eval(&binary.right)?) {
                     (Value::Number(l), Value::Number(r)) => {
                         Value::Number(l + r)
@@ -195,26 +195,26 @@ impl ExprVisitor for Interpreter {
                     }
                 }
             }
-            TokenKind::Greater => Value::Bool(
+            Token::Greater(_) => Value::Bool(
                 self.eval_number(&binary.left)?
                     > self.eval_number(&binary.right)?,
             ),
-            TokenKind::GreaterEqual => Value::Bool(
+            Token::GreaterEqual(_) => Value::Bool(
                 self.eval_number(&binary.left)?
                     >= self.eval_number(&binary.right)?,
             ),
-            TokenKind::Less => Value::Bool(
+            Token::Less(_) => Value::Bool(
                 self.eval_number(&binary.left)?
                     < self.eval_number(&binary.right)?,
             ),
-            TokenKind::LessEqual => Value::Bool(
+            Token::LessEqual(_) => Value::Bool(
                 self.eval_number(&binary.left)?
                     <= self.eval_number(&binary.right)?,
             ),
-            TokenKind::EqualEqual => Value::Bool(
+            Token::EqualEqual(_) => Value::Bool(
                 self.eval(&binary.left)? == self.eval(&binary.right)?,
             ),
-            TokenKind::BangEqual => Value::Bool(
+            Token::BangEqual(_) => Value::Bool(
                 self.eval(&binary.left)? != self.eval(&binary.right)?,
             ),
             _ => unreachable!(),
@@ -226,25 +226,27 @@ impl ExprVisitor for Interpreter {
     }
 
     fn visit_variable_expr(&mut self, expr: &VariableExpr) -> Self::Output {
-        let TokenKind::Identifier(ident) = &expr.ident.kind else {
+        let Token::Identifier(ident) = &expr.ident else {
             unreachable!();
         };
         let depth = self.name_resolution.get(expr.decoration).unwrap();
-        let value = self.values.get(ident, depth).unwrap();
+        let value = self.values.get(&ident.value, depth).unwrap();
         if matches!(value, Value::Uninitialized) {
-            return Err(InterpretError::UninitializedVariable(expr.ident.span));
+            return Err(InterpretError::UninitializedVariable(
+                expr.ident.span(),
+            ));
         }
 
         Ok(value.clone())
     }
 
     fn visit_assign_expr(&mut self, expr: &AssignExpr) -> Self::Output {
-        let TokenKind::Identifier(ident) = &expr.ident.kind else {
+        let Token::Identifier(ident) = &expr.ident else {
             unreachable!();
         };
         let depth = self.name_resolution.get(expr.decoration).unwrap();
         let value = self.eval(&expr.expr)?;
-        self.values.set(ident, depth, value.clone());
+        self.values.set(&ident.value, depth, value.clone());
 
         Ok(value)
     }
@@ -259,10 +261,10 @@ impl StmtVisitor for Interpreter {
         } else {
             Value::Uninitialized
         };
-        let TokenKind::Identifier(ident) = &stmt.ident.kind else {
+        let Token::Identifier(ident) = &stmt.ident else {
             unreachable!()
         };
-        self.values.define(ident.clone(), value);
+        self.values.define(ident.value.clone(), value);
         Ok(())
     }
 
