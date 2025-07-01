@@ -327,6 +327,11 @@ impl<'a> Scanner<'a> {
     }
 }
 
+pub trait TokenKind {
+    fn matches_token(token: &Token) -> bool;
+    fn from_token(token: Token) -> Self;
+}
+
 macro_rules! token {
     (
         pub enum $name:ident {
@@ -347,6 +352,19 @@ macro_rules! token {
 
                 fn span_end(&self) -> usize {
                     self.span.end()
+                }
+            }
+
+            impl $crate::scanner::TokenKind for $variant {
+                fn matches_token(token: &$crate::scanner::Token) -> bool {
+                    ::core::matches!(token, $crate::scanner::Token::$variant(_))
+                }
+
+                fn from_token(token: $crate::scanner::Token) -> Self {
+                    let $crate::scanner::Token::$variant(this) = token else {
+                        ::core::unreachable!()
+                    };
+                    this
                 }
             }
         )*

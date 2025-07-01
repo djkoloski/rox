@@ -4,8 +4,8 @@ use crate::{
     ast::{
         decoration::Decorator,
         expr::{
-            AssignExpr, BinaryExpr, Expr, GroupingExpr, LiteralExpr, UnaryExpr,
-            VariableExpr,
+            AssignExpr, BinaryExpr, BinaryOperator, Expr, GroupingExpr,
+            LiteralExpr, UnaryExpr, VariableExpr,
         },
         stmt::{
             BlockStmt, DeclStmt, ExprStmt, IfStmt, PrintStmt, Program, Repl,
@@ -13,7 +13,7 @@ use crate::{
         },
     },
     diagnostic::{Context, Diagnostic},
-    scanner::Token,
+    scanner::{LeftBrace, Token, TokenKind, Var},
     span::{Span, Spanned as _},
 };
 
@@ -137,12 +137,9 @@ impl Parser {
         self.tokens.last().unwrap()
     }
 
-    fn expect(
-        &mut self,
-        matches: impl FnOnce(&Token) -> bool,
-    ) -> Option<Token> {
-        if matches(self.peek()) {
-            Some(self.next())
+    fn expect<T: TokenKind>(&mut self) -> Option<T> {
+        if T::matches_token(self.peek()) {
+            Some(T::from_token(self.next()))
         } else {
             None
         }
@@ -156,24 +153,14 @@ impl Parser {
         let mut stmts = Vec::new();
 
         loop {
-            match self.peek() {
-                Token::Eof(_) => break,
-                _ => {
-                    if let Some(stmt) = self.declaration() {
-                        stmts.push(stmt);
-                    } else {
-                        self.synchronize(|token| {
-                            matches!(token, Token::Semicolon(_))
-                        });
-                    }
-                }
+            if let Some(eof) = self.expect() {
+                break Some(Program { stmts, eof });
+            } else if let Some(stmt) = self.declaration() {
+                stmts.push(stmt);
+            } else {
+                self.synchronize(|token| matches!(token, Token::Semicolon(_)));
             }
         }
-
-        Some(Program {
-            stmts,
-            eof: self.next(),
-        })
     }
 
     fn repl(&mut self) -> Option<Repl> {
@@ -194,9 +181,8 @@ impl Parser {
     }
 
     fn decl_stmt(&mut self) -> Option<Stmt> {
-        let var = self.next();
-        let Some(ident) = self.expect(|k| matches!(k, Token::Identifier(_)))
-        else {
+        let var = self.expect::<Var>()?;
+        let Some(ident) = self.expect() else {
             self.errors.push(ParseError::ExpectedIdent {
                 stmt: var.span(),
                 next: self.peek().span(),
@@ -204,16 +190,14 @@ impl Parser {
             return None;
         };
 
-        let assignment = if matches!(self.peek(), Token::Equal(_)) {
-            let equal = self.next();
+        let assignment = if let Some(equal) = self.expect() {
             let expr = self.expression()?;
             Some((equal, expr))
         } else {
             None
         };
 
-        let Some(semi) = self.expect(|k| matches!(k, Token::Semicolon(_)))
-        else {
+        let Some(semi) = self.expect() else {
             let stmt = if let Some((_, expr)) = &assignment {
                 Span::across(&var, expr)
             } else {
@@ -245,13 +229,13 @@ impl Parser {
     }
 
     fn if_stmt(&mut self) -> Option<Stmt> {
-        let if_ = self.next();
+        let if_ = self.expect()?;
 
         let group = self.grouped()?;
         let then = self.statement()?;
 
         let mut else_ = None;
-        if let Some(else_token) = self.expect(|k| matches!(k, Token::Else(_))) {
+        if let Some(else_token) = self.expect() {
             else_ = Some((else_token, Box::new(self.statement()?)));
         }
 
@@ -264,10 +248,9 @@ impl Parser {
     }
 
     fn print_stmt(&mut self) -> Option<Stmt> {
-        let print = self.next();
+        let print = self.expect()?;
         let expr = self.expression()?;
-        let Some(semi) = self.expect(|k| matches!(k, Token::Semicolon(_)))
-        else {
+        let Some(semi) = self.expect() else {
             self.errors.push(ParseError::UnterminatedStatement {
                 stmt: Span::across(&print, &expr),
                 next: self.peek().span(),
@@ -279,7 +262,7 @@ impl Parser {
     }
 
     fn block_stmt(&mut self) -> Option<Stmt> {
-        let lbrace = self.next();
+        let lbrace = self.expect::<LeftBrace>()?;
         let mut stmts = Vec::new();
 
         loop {
@@ -298,7 +281,7 @@ impl Parser {
             }
         }
 
-        let rbrace = self.next();
+        let rbrace = self.expect()?;
 
         Some(Stmt::Block(BlockStmt {
             lbrace,
@@ -309,8 +292,7 @@ impl Parser {
 
     fn expr_stmt(&mut self) -> Option<Stmt> {
         let expr = self.expression()?;
-        let Some(semi) = self.expect(|k| matches!(k, Token::Semicolon(_)))
-        else {
+        let Some(semi) = self.expect() else {
             self.errors.push(ParseError::UnterminatedStatement {
                 stmt: expr.span(),
                 next: self.peek().span(),
@@ -328,7 +310,7 @@ impl Parser {
     fn assignment(&mut self) -> Option<Expr> {
         let expr = self.equality()?;
 
-        if let Some(equal) = self.expect(|k| matches!(k, Token::Equal(_))) {
+        if let Some(equal) = self.expect() {
             let value = self.assignment()?;
 
             if let Expr::Variable(VariableExpr { decoration, ident }) = expr {
@@ -350,21 +332,24 @@ impl Parser {
 
     fn equality(&mut self) -> Option<Expr> {
         self.parse_left_binary(
-            |kind| matches!(kind, Token::BangEqual(_) | Token::EqualEqual(_)),
+            |this| match this.peek() {
+                Token::BangEqual(_) | Token::EqualEqual(_) => {
+                    Some(this.expect().unwrap())
+                }
+                _ => None,
+            },
             |this| this.comparison(),
         )
     }
 
     fn comparison(&mut self) -> Option<Expr> {
         self.parse_left_binary(
-            |kind| {
-                matches!(
-                    kind,
-                    Token::Greater(_)
-                        | Token::GreaterEqual(_)
-                        | Token::Less(_)
-                        | Token::LessEqual(_)
-                )
+            |this| match this.peek() {
+                Token::Greater(_)
+                | Token::GreaterEqual(_)
+                | Token::Less(_)
+                | Token::LessEqual(_) => Some(this.expect().unwrap()),
+                _ => None,
             },
             |this| this.term(),
         )
@@ -372,25 +357,33 @@ impl Parser {
 
     fn term(&mut self) -> Option<Expr> {
         self.parse_left_binary(
-            |kind| matches!(kind, Token::Minus(_) | Token::Plus(_)),
+            |this| match this.peek() {
+                Token::Minus(_) | Token::Plus(_) => {
+                    Some(this.expect().unwrap())
+                }
+                _ => None,
+            },
             |this| this.factor(),
         )
     }
 
     fn factor(&mut self) -> Option<Expr> {
         self.parse_left_binary(
-            |kind| matches!(kind, Token::Slash(_) | Token::Star(_)),
+            |this| match this.peek() {
+                Token::Slash(_) | Token::Star(_) => {
+                    Some(this.expect().unwrap())
+                }
+                _ => None,
+            },
             |this| this.unary(),
         )
     }
 
     fn unary(&mut self) -> Option<Expr> {
-        if matches!(self.peek(), Token::Bang(_) | Token::Minus(_)) {
-            let operator = self.next();
-            let inner = self.unary()?;
+        if let Some(operator) = self.expect() {
             Some(Expr::Unary(UnaryExpr {
                 operator,
-                inner: Box::new(inner),
+                inner: Box::new(self.unary()?),
             }))
         } else {
             self.primary()
@@ -403,13 +396,13 @@ impl Parser {
             | Token::String(_)
             | Token::True(_)
             | Token::False(_)
-            | Token::Nil(_) => {
-                Some(Expr::Literal(LiteralExpr { token: self.next() }))
-            }
+            | Token::Nil(_) => Some(Expr::Literal(LiteralExpr {
+                literal: self.expect().unwrap(),
+            })),
             Token::LeftParen(_) => self.grouped().map(Expr::Grouping),
             Token::Identifier(_) => Some(Expr::Variable(VariableExpr {
                 decoration: self.decorator.decorate(),
-                ident: self.next(),
+                ident: self.expect().unwrap(),
             })),
             _ => {
                 self.errors
@@ -420,8 +413,7 @@ impl Parser {
     }
 
     fn grouped(&mut self) -> Option<GroupingExpr> {
-        let Some(lparen) = self.expect(|k| matches!(k, Token::LeftParen(_)))
-        else {
+        let Some(lparen) = self.expect() else {
             self.errors
                 .push(ParseError::ExpectedLeftParen(self.peek().span()));
             return None;
@@ -436,7 +428,7 @@ impl Parser {
             Token::RightParen(_) => Some(GroupingExpr {
                 lparen,
                 inner: Box::new(inner),
-                rparen: self.next(),
+                rparen: self.expect().unwrap(),
             }),
             _ => {
                 self.errors.push(ParseError::UnterminatedGroup(Span::across(
@@ -460,13 +452,12 @@ impl Parser {
 
     fn parse_left_binary(
         &mut self,
-        matches: impl Fn(&Token) -> bool,
+        mut operator: impl FnMut(&mut Self) -> Option<BinaryOperator>,
         mut operand: impl FnMut(&mut Self) -> Option<Expr>,
     ) -> Option<Expr> {
         let mut expr = operand(self)?;
 
-        while matches(self.peek()) {
-            let operator = self.next();
+        while let Some(operator) = operator(self) {
             let right = operand(self)?;
             expr = Expr::Binary(BinaryExpr {
                 left: Box::new(expr),

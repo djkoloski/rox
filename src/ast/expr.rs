@@ -1,4 +1,11 @@
-use crate::{ast::decoration::Decoration, scanner::Token};
+use crate::{
+    ast::decoration::Decoration,
+    scanner::{
+        Bang, BangEqual, Equal, EqualEqual, False, Greater, GreaterEqual,
+        Identifier, LeftParen, Less, LessEqual, Minus, Nil, Number, Plus,
+        RightParen, Slash, Star, String, True,
+    },
+};
 
 pub trait ExprVisitor {
     type Output;
@@ -28,20 +35,49 @@ ast_node! {
 
     #[visit(VisitExpr, ExprVisitor::visit_literal_expr)]
     pub struct LiteralExpr {
-        pub token: Token,
+        pub literal: Literal,
+    }
+
+    #[token]
+    pub enum Literal {
+        Number(Number),
+        String(String),
+        True(True),
+        False(False),
+        Nil(Nil),
     }
 
     #[visit(VisitExpr, ExprVisitor::visit_unary_expr)]
     pub struct UnaryExpr {
-        pub operator: Token,
+        pub operator: UnaryOperator,
         pub inner: Box<Expr>,
+    }
+
+    #[token]
+    pub enum UnaryOperator {
+        Bang(Bang),
+        Minus(Minus),
     }
 
     #[visit(VisitExpr, ExprVisitor::visit_binary_expr)]
     pub struct BinaryExpr {
         pub left: Box<Expr>,
-        pub operator: Token,
+        pub operator: BinaryOperator,
         pub right: Box<Expr>,
+    }
+
+    #[token]
+    pub enum BinaryOperator {
+        Greater(Greater),
+        GreaterEqual(GreaterEqual),
+        Less(Less),
+        LessEqual(LessEqual),
+        BangEqual(BangEqual),
+        EqualEqual(EqualEqual),
+        Minus(Minus),
+        Plus(Plus),
+        Slash(Slash),
+        Star(Star),
     }
 
     #[visit(
@@ -50,22 +86,22 @@ ast_node! {
         fn accept(self, visitor) { self.inner.accept(visitor) },
     )]
     pub struct GroupingExpr {
-        pub lparen: Token,
+        pub lparen: LeftParen,
         pub inner: Box<Expr>,
-        pub rparen: Token,
+        pub rparen: RightParen,
     }
 
     #[visit(VisitExpr, ExprVisitor::visit_variable_expr)]
     pub struct VariableExpr {
         pub decoration: Decoration,
-        pub ident: Token,
+        pub ident: Identifier,
     }
 
     #[visit(VisitExpr, ExprVisitor::visit_assign_expr)]
     pub struct AssignExpr {
         pub decoration: Decoration,
-        pub ident: Token,
-        pub equal: Token,
+        pub ident: Identifier,
+        pub equal: Equal,
         pub expr: Box<Expr>,
     }
 }

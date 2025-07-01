@@ -1,6 +1,6 @@
 use crate::{
     ast::expr::{Expr, GroupingExpr},
-    scanner::Token,
+    scanner::*,
 };
 
 pub trait StmtVisitor {
@@ -20,7 +20,7 @@ pub trait VisitStmt<V: StmtVisitor> {
 ast_node! {
     pub struct Program {
         pub stmts: Vec<Stmt>,
-        pub eof: Token,
+        pub eof: Eof,
     }
 
     pub enum Repl {
@@ -39,37 +39,37 @@ ast_node! {
 
     #[visit(VisitStmt, StmtVisitor::visit_decl_stmt)]
     pub struct DeclStmt {
-        pub var: Token,
-        pub ident: Token,
-        pub assignment: Option<(Token, Expr)>,
-        pub semi: Token,
+        pub var: Var,
+        pub ident: Identifier,
+        pub assignment: Option<(Equal, Expr)>,
+        pub semi: Semicolon,
     }
 
     #[visit(VisitStmt, StmtVisitor::visit_expr_stmt)]
     pub struct ExprStmt {
         pub expr: Expr,
-        pub semi: Token,
+        pub semi: Semicolon,
     }
 
     #[visit(VisitStmt, StmtVisitor::visit_print_stmt)]
     pub struct PrintStmt {
-        pub print: Token,
+        pub print: Print,
         pub expr: Expr,
-        pub semi: Token,
+        pub semi: Semicolon,
     }
 
     #[visit(VisitStmt, StmtVisitor::visit_block_stmt)]
     pub struct BlockStmt {
-        pub lbrace: Token,
+        pub lbrace: LeftBrace,
         pub stmts: Vec<Stmt>,
-        pub rbrace: Token,
+        pub rbrace: RightBrace,
     }
 
     #[visit(VisitStmt, StmtVisitor::visit_if_stmt)]
     pub struct IfStmt {
-        pub if_: Token,
+        pub if_: If,
         pub group: GroupingExpr,
         pub then: Box<Stmt>,
-        pub else_: Option<(Token, Box<Stmt>)>,
+        pub else_: Option<(Else, Box<Stmt>)>,
     }
 }

@@ -10,6 +10,52 @@ macro_rules! ast_node {
         }
         $($rest:tt)*
     ) => {
+        ast_node!(@enum $name { $($variant($ty),)* });
+
+        ast_node!(
+            @enum_visit
+            $(#[$visit_trait, $visitor_trait])?
+            $name { $($variant)* }
+        );
+
+        ast_node! {
+            $($rest)*
+        }
+    };
+    (
+        #[token]
+        pub enum $name:ident {
+            $($variant:ident($ty:ty)),*
+            $(,)?
+        }
+        $($rest:tt)*
+    ) => {
+        ast_node!(@enum $name { $($variant($ty),)* });
+
+        impl $crate::scanner::TokenKind for $name {
+            fn matches_token(token: &$crate::scanner::Token) -> bool {
+                ::core::matches!(
+                    token,
+                    $($crate::scanner::Token::$variant(_))|*,
+                )
+            }
+
+            fn from_token(token: $crate::scanner::Token) -> Self {
+                match token {
+                    $(
+                        $crate::scanner::Token::$variant(value) =>
+                            Self::$variant(value),
+                    )*
+                    _ => ::core::unreachable!(),
+                }
+            }
+        }
+
+        ast_node! {
+            $($rest)*
+        }
+    };
+    (@enum $name:ident { $($variant:ident($ty:ty),)* }) => {
         pub enum $name {
             $($variant($ty),)*
         }
@@ -26,16 +72,6 @@ macro_rules! ast_node {
                     $(Self::$variant(value) => value.span_end(),)*
                 }
             }
-        }
-
-        ast_node!(
-            @enum_visit
-            $(#[$visit_trait, $visitor_trait])?
-            $name { $($variant)* }
-        );
-
-        ast_node! {
-            $($rest)*
         }
     };
     (@enum_visit $name:ident { $($variant:ident)* }) => {};

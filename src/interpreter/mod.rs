@@ -9,8 +9,9 @@ pub use self::error::InterpretError;
 use crate::{
     ast::{
         expr::{
-            AssignExpr, BinaryExpr, Expr, ExprVisitor, GroupingExpr,
-            LiteralExpr, UnaryExpr, VariableExpr, VisitExpr,
+            AssignExpr, BinaryExpr, BinaryOperator, Expr, ExprVisitor,
+            GroupingExpr, Literal, LiteralExpr, UnaryExpr, UnaryOperator,
+            VariableExpr, VisitExpr,
         },
         stmt::{
             BlockStmt, DeclStmt, ExprStmt, IfStmt, PrintStmt, Program,
@@ -18,7 +19,6 @@ use crate::{
         },
     },
     interpreter::{eval::Value, name_resolution::NameResolution},
-    scanner::Token,
     span::Spanned,
 };
 
@@ -127,37 +127,37 @@ impl ExprVisitor for Interpreter {
     type Output = Result<Value, InterpretError>;
 
     fn visit_literal_expr(&mut self, literal: &LiteralExpr) -> Self::Output {
-        Ok(match &literal.token {
-            Token::Nil(_) => Value::Nil,
-            Token::True(_) => Value::Bool(true),
-            Token::False(_) => Value::Bool(false),
-            Token::Number(x) => Value::Number(x.value),
-            Token::String(s) => Value::String(s.value.clone()),
-            _ => unreachable!(),
+        Ok(match &literal.literal {
+            Literal::Nil(_) => Value::Nil,
+            Literal::True(_) => Value::Bool(true),
+            Literal::False(_) => Value::Bool(false),
+            Literal::Number(x) => Value::Number(x.value),
+            Literal::String(s) => Value::String(s.value.clone()),
         })
     }
 
     fn visit_unary_expr(&mut self, unary: &UnaryExpr) -> Self::Output {
         Ok(match unary.operator {
-            Token::Bang(_) => {
+            UnaryOperator::Bang(_) => {
                 Value::Bool(!self.eval(&unary.inner)?.truthiness())
             }
-            Token::Minus(_) => Value::Number(-self.eval_number(&unary.inner)?),
-            _ => unreachable!(),
+            UnaryOperator::Minus(_) => {
+                Value::Number(-self.eval_number(&unary.inner)?)
+            }
         })
     }
 
     fn visit_binary_expr(&mut self, binary: &BinaryExpr) -> Self::Output {
         Ok(match binary.operator {
-            Token::Minus(_) => Value::Number(
+            BinaryOperator::Minus(_) => Value::Number(
                 self.eval_number(&binary.left)?
                     - self.eval_number(&binary.right)?,
             ),
-            Token::Star(_) => Value::Number(
+            BinaryOperator::Star(_) => Value::Number(
                 self.eval_number(&binary.left)?
                     * self.eval_number(&binary.right)?,
             ),
-            Token::Slash(_) => {
+            BinaryOperator::Slash(_) => {
                 let num = self.eval_number(&binary.left)?;
                 let den = self.eval_number(&binary.right)?;
                 if den == 0.0 {
@@ -167,7 +167,7 @@ impl ExprVisitor for Interpreter {
                 }
                 Value::Number(num / den)
             }
-            Token::Plus(_) => {
+            BinaryOperator::Plus(_) => {
                 match (self.eval(&binary.left)?, self.eval(&binary.right)?) {
                     (Value::Number(l), Value::Number(r)) => {
                         Value::Number(l + r)
@@ -195,29 +195,28 @@ impl ExprVisitor for Interpreter {
                     }
                 }
             }
-            Token::Greater(_) => Value::Bool(
+            BinaryOperator::Greater(_) => Value::Bool(
                 self.eval_number(&binary.left)?
                     > self.eval_number(&binary.right)?,
             ),
-            Token::GreaterEqual(_) => Value::Bool(
+            BinaryOperator::GreaterEqual(_) => Value::Bool(
                 self.eval_number(&binary.left)?
                     >= self.eval_number(&binary.right)?,
             ),
-            Token::Less(_) => Value::Bool(
+            BinaryOperator::Less(_) => Value::Bool(
                 self.eval_number(&binary.left)?
                     < self.eval_number(&binary.right)?,
             ),
-            Token::LessEqual(_) => Value::Bool(
+            BinaryOperator::LessEqual(_) => Value::Bool(
                 self.eval_number(&binary.left)?
                     <= self.eval_number(&binary.right)?,
             ),
-            Token::EqualEqual(_) => Value::Bool(
+            BinaryOperator::EqualEqual(_) => Value::Bool(
                 self.eval(&binary.left)? == self.eval(&binary.right)?,
             ),
-            Token::BangEqual(_) => Value::Bool(
+            BinaryOperator::BangEqual(_) => Value::Bool(
                 self.eval(&binary.left)? != self.eval(&binary.right)?,
             ),
-            _ => unreachable!(),
         })
     }
 
@@ -226,11 +225,8 @@ impl ExprVisitor for Interpreter {
     }
 
     fn visit_variable_expr(&mut self, expr: &VariableExpr) -> Self::Output {
-        let Token::Identifier(ident) = &expr.ident else {
-            unreachable!();
-        };
         let depth = self.name_resolution.get(expr.decoration).unwrap();
-        let value = self.values.get(&ident.value, depth).unwrap();
+        let value = self.values.get(&expr.ident.value, depth).unwrap();
         if matches!(value, Value::Uninitialized) {
             return Err(InterpretError::UninitializedVariable(
                 expr.ident.span(),
@@ -241,12 +237,9 @@ impl ExprVisitor for Interpreter {
     }
 
     fn visit_assign_expr(&mut self, expr: &AssignExpr) -> Self::Output {
-        let Token::Identifier(ident) = &expr.ident else {
-            unreachable!();
-        };
         let depth = self.name_resolution.get(expr.decoration).unwrap();
         let value = self.eval(&expr.expr)?;
-        self.values.set(&ident.value, depth, value.clone());
+        self.values.set(&expr.ident.value, depth, value.clone());
 
         Ok(value)
     }
@@ -261,10 +254,7 @@ impl StmtVisitor for Interpreter {
         } else {
             Value::Uninitialized
         };
-        let Token::Identifier(ident) = &stmt.ident else {
-            unreachable!()
-        };
-        self.values.define(ident.value.clone(), value);
+        self.values.define(stmt.ident.value.clone(), value);
         Ok(())
     }
 
