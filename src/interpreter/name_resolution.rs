@@ -9,8 +9,8 @@ use crate::{
             UnaryExpr, VariableExpr, VisitExpr as _,
         },
         stmt::{
-            BlockStmt, DeclStmt, ExprStmt, IfStmt, PrintStmt, StmtVisitor,
-            VisitStmt as _,
+            BlockStmt, ExprStmt, FunDeclStmt, IfStmt, PrintStmt, StmtVisitor,
+            VarDeclStmt, VisitStmt as _,
         },
     },
     interpreter::{eval::Value, Environment, InterpretError, Scope},
@@ -62,11 +62,15 @@ impl StmtVisitor for NameResolution {
         self.names.pop();
     }
 
-    fn visit_decl_stmt(&mut self, stmt: &DeclStmt) -> Self::Output {
+    fn visit_var_decl_stmt(&mut self, stmt: &VarDeclStmt) -> Self::Output {
         if let Some((_, expr)) = &stmt.assignment {
             expr.accept(self);
         }
         self.names.define(stmt.ident.value.clone(), ());
+    }
+
+    fn visit_fun_decl_stmt(&mut self, _stmt: &FunDeclStmt) -> Self::Output {
+        todo!()
     }
 
     fn visit_expr_stmt(&mut self, stmt: &ExprStmt) -> Self::Output {

@@ -13,8 +13,8 @@ use crate::{
             UnaryOperator, VariableExpr, VisitExpr,
         },
         stmt::{
-            BlockStmt, DeclStmt, ExprStmt, IfStmt, PrintStmt, Program, Repl,
-            StmtVisitor, VisitStmt as _,
+            BlockStmt, ExprStmt, FunDeclStmt, IfStmt, PrintStmt, Program, Repl,
+            StmtVisitor, VarDeclStmt, VisitStmt as _,
         },
     },
     interpreter::{
@@ -313,7 +313,7 @@ impl ExprVisitor for Interpreter {
 impl StmtVisitor for Interpreter {
     type Output = Result<(), InterpretError>;
 
-    fn visit_decl_stmt(&mut self, stmt: &DeclStmt) -> Self::Output {
+    fn visit_var_decl_stmt(&mut self, stmt: &VarDeclStmt) -> Self::Output {
         let value = if let Some(assignment) = &stmt.assignment {
             self.eval(&assignment.1)?
         } else {
@@ -321,6 +321,10 @@ impl StmtVisitor for Interpreter {
         };
         self.values.define(stmt.ident.value.clone(), value);
         Ok(())
+    }
+
+    fn visit_fun_decl_stmt(&mut self, _stmt: &FunDeclStmt) -> Self::Output {
+        todo!()
     }
 
     fn visit_expr_stmt(&mut self, stmt: &ExprStmt) -> Self::Output {

@@ -9,12 +9,12 @@ use crate::{
         },
         punctuated::Punctuated,
         stmt::{
-            BlockStmt, DeclStmt, ExprStmt, IfStmt, PrintStmt, Program, Repl,
-            Stmt,
+            BlockStmt, ExprStmt, FunDeclStmt, IfStmt, PrintStmt, Program, Repl,
+            Stmt, VarDeclStmt,
         },
     },
     diagnostic::{Context, Diagnostic},
-    scanner::{LeftBrace, RightParen, Semicolon, Token, TokenKind, Var},
+    scanner::{Fun, LeftBrace, RightParen, Semicolon, Token, TokenKind, Var},
     span::{Span, Spanned as _},
 };
 
@@ -24,7 +24,7 @@ pub enum ParseError {
     UnterminatedGroup(Span),
     UnterminatedStatement { stmt: Span, next: Span },
     UnterminatedBlock(Span),
-    ExpectedIdent { stmt: Span, next: Span },
+    ExpectedIdent { span: Span, next: Span },
     ExpectedLeftParen(Span),
     ExpectedRightParen(Span),
     InvalidAssignmentTarget(Span),
@@ -75,14 +75,14 @@ impl Diagnostic for ParseError {
                     format_args!("this block is missing a closing '}}'"),
                 )?;
             }
-            Self::ExpectedIdent { stmt, next } => {
+            Self::ExpectedIdent { span: stmt, next } => {
                 c.error(f, format_args!("expected identifier"))?;
                 c.span(
                     *stmt,
                     f,
                     format_args!(
-                        "this variable declaration was followed by '{}' \
-                         instead of a valid identifier",
+                        "this declaration was followed by '{}' instead of a \
+                         valid identifier",
                         next.get(c.source())
                     ),
                 )?;
@@ -182,6 +182,7 @@ impl Parser {
     fn repl(&mut self) -> Option<Repl> {
         match self.peek() {
             Token::Var(_)
+            | Token::Fun(_)
             | Token::Print(_)
             | Token::LeftBrace(_)
             | Token::If(_) => Some(Repl::Stmt(self.declaration()?)),
@@ -191,16 +192,17 @@ impl Parser {
 
     fn declaration(&mut self) -> Option<Stmt> {
         match self.peek() {
-            Token::Var(_) => self.decl_stmt(),
+            Token::Var(_) => self.var_decl_stmt(),
+            Token::Fun(_) => self.fun_decl_stmt(),
             _ => self.statement(),
         }
     }
 
-    fn decl_stmt(&mut self) -> Option<Stmt> {
+    fn var_decl_stmt(&mut self) -> Option<Stmt> {
         let var = self.try_next::<Var>()?;
         let Some(ident) = self.try_next() else {
             self.errors.push(ParseError::ExpectedIdent {
-                stmt: var.span(),
+                span: var.span(),
                 next: self.peek().span(),
             });
             return None;
@@ -227,7 +229,7 @@ impl Parser {
             return None;
         };
 
-        Some(Stmt::Decl(DeclStmt {
+        Some(Stmt::VarDecl(VarDeclStmt {
             var,
             ident,
             assignment,
@@ -235,16 +237,68 @@ impl Parser {
         }))
     }
 
-    fn statement(&mut self) -> Option<Stmt> {
-        match self.peek() {
-            Token::If(_) => self.if_stmt(),
-            Token::Print(_) => self.print_stmt(),
-            Token::LeftBrace(_) => self.block_stmt(),
-            _ => self.expr_stmt(),
+    fn fun_decl_stmt(&mut self) -> Option<Stmt> {
+        let fun = self.try_next::<Fun>()?;
+        let Some(name) = self.try_next() else {
+            self.errors.push(ParseError::ExpectedIdent {
+                span: fun.span(),
+                next: self.peek().span(),
+            });
+            return None;
+        };
+
+        let Some(lparen) = self.try_next() else {
+            self.errors
+                .push(ParseError::ExpectedLeftParen(self.peek().span()));
+            return None;
+        };
+
+        let mut params = Punctuated::new();
+        while !matches!(self.peek(), Token::RightParen(_)) {
+            let Some(ident) = self.try_next() else {
+                self.errors.push(ParseError::ExpectedIdent {
+                    span: fun.span(),
+                    next: self.peek().span(),
+                });
+                return None;
+            };
+            params.push(ident);
+            if matches!(self.peek(), Token::Comma(_)) {
+                params.push_punct(self.expect());
+            } else {
+                break;
+            }
         }
+
+        let Some(rparen) = self.try_next() else {
+            self.errors
+                .push(ParseError::ExpectedRightParen(self.peek().span()));
+            self.synchronize::<RightParen>();
+            return None;
+        };
+
+        let body = self.block_stmt()?;
+
+        Some(Stmt::FunDecl(FunDeclStmt {
+            fun,
+            name,
+            lparen,
+            params,
+            rparen,
+            body,
+        }))
     }
 
-    fn if_stmt(&mut self) -> Option<Stmt> {
+    fn statement(&mut self) -> Option<Stmt> {
+        Some(match self.peek() {
+            Token::If(_) => self.if_stmt()?.into(),
+            Token::Print(_) => self.print_stmt()?.into(),
+            Token::LeftBrace(_) => self.block_stmt()?.into(),
+            _ => self.expr_stmt()?.into(),
+        })
+    }
+
+    fn if_stmt(&mut self) -> Option<IfStmt> {
         let if_ = self.try_next()?;
 
         let group = self.grouped()?;
@@ -255,15 +309,15 @@ impl Parser {
             else_ = Some((else_token, Box::new(self.statement()?)));
         }
 
-        Some(Stmt::If(IfStmt {
+        Some(IfStmt {
             if_,
             group,
             then: Box::new(then),
             else_,
-        }))
+        })
     }
 
-    fn print_stmt(&mut self) -> Option<Stmt> {
+    fn print_stmt(&mut self) -> Option<PrintStmt> {
         let print = self.try_next()?;
         let expr = self.expression()?;
         let Some(semi) = self.try_next() else {
@@ -274,10 +328,10 @@ impl Parser {
             return None;
         };
 
-        Some(Stmt::Print(PrintStmt { print, expr, semi }))
+        Some(PrintStmt { print, expr, semi })
     }
 
-    fn block_stmt(&mut self) -> Option<Stmt> {
+    fn block_stmt(&mut self) -> Option<BlockStmt> {
         let lbrace = self.try_next::<LeftBrace>()?;
         let mut stmts = Vec::new();
 
@@ -299,14 +353,14 @@ impl Parser {
 
         let rbrace = self.try_next()?;
 
-        Some(Stmt::Block(BlockStmt {
+        Some(BlockStmt {
             lbrace,
             stmts,
             rbrace,
-        }))
+        })
     }
 
-    fn expr_stmt(&mut self) -> Option<Stmt> {
+    fn expr_stmt(&mut self) -> Option<ExprStmt> {
         let expr = self.expression()?;
         let Some(semi) = self.try_next() else {
             self.errors.push(ParseError::UnterminatedStatement {
@@ -316,7 +370,7 @@ impl Parser {
             return None;
         };
 
-        Some(Stmt::Expr(ExprStmt { expr, semi }))
+        Some(ExprStmt { expr, semi })
     }
 
     fn expression(&mut self) -> Option<Expr> {

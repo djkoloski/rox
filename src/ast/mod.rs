@@ -73,6 +73,14 @@ macro_rules! ast_node {
                 }
             }
         }
+
+        $(
+            impl From<$ty> for $name {
+                fn from(value: $ty) -> Self {
+                    Self::$variant(value)
+                }
+            }
+        )*
     };
     (@enum_visit $name:ident { $($variant:ident)* }) => {};
     (@enum_visit

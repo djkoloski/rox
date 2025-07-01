@@ -1,12 +1,16 @@
 use crate::{
-    ast::expr::{Expr, GroupingExpr},
+    ast::{
+        expr::{Expr, GroupingExpr},
+        punctuated::Punctuated,
+    },
     scanner::*,
 };
 
 pub trait StmtVisitor {
     type Output;
 
-    fn visit_decl_stmt(&mut self, stmt: &DeclStmt) -> Self::Output;
+    fn visit_var_decl_stmt(&mut self, stmt: &VarDeclStmt) -> Self::Output;
+    fn visit_fun_decl_stmt(&mut self, stmt: &FunDeclStmt) -> Self::Output;
     fn visit_expr_stmt(&mut self, stmt: &ExprStmt) -> Self::Output;
     fn visit_print_stmt(&mut self, stmt: &PrintStmt) -> Self::Output;
     fn visit_block_stmt(&mut self, stmt: &BlockStmt) -> Self::Output;
@@ -30,19 +34,30 @@ ast_node! {
 
     #[visit(VisitStmt, StmtVisitor)]
     pub enum Stmt {
-        Decl(DeclStmt),
+        VarDecl(VarDeclStmt),
+        FunDecl(FunDeclStmt),
         Expr(ExprStmt),
         Print(PrintStmt),
         Block(BlockStmt),
         If(IfStmt),
     }
 
-    #[visit(VisitStmt, StmtVisitor::visit_decl_stmt)]
-    pub struct DeclStmt {
+    #[visit(VisitStmt, StmtVisitor::visit_var_decl_stmt)]
+    pub struct VarDeclStmt {
         pub var: Var,
         pub ident: Identifier,
         pub assignment: Option<(Equal, Expr)>,
         pub semi: Semicolon,
+    }
+
+    #[visit(VisitStmt, StmtVisitor::visit_fun_decl_stmt)]
+    pub struct FunDeclStmt {
+        pub fun: Fun,
+        pub name: Identifier,
+        pub lparen: LeftParen,
+        pub params: Punctuated<Identifier, Comma>,
+        pub rparen: RightParen,
+        pub body: BlockStmt,
     }
 
     #[visit(VisitStmt, StmtVisitor::visit_expr_stmt)]
