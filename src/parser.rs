@@ -137,12 +137,16 @@ impl Parser {
         self.tokens.last().unwrap()
     }
 
-    fn expect<T: TokenKind>(&mut self) -> Option<T> {
+    fn try_next<T: TokenKind>(&mut self) -> Option<T> {
         if T::matches_token(self.peek()) {
             Some(T::from_token(self.next()))
         } else {
             None
         }
+    }
+
+    fn expect<T: TokenKind>(&mut self) -> T {
+        T::from_token(self.next())
     }
 
     fn next(&mut self) -> Token {
@@ -153,7 +157,7 @@ impl Parser {
         let mut stmts = Vec::new();
 
         loop {
-            if let Some(eof) = self.expect() {
+            if let Some(eof) = self.try_next() {
                 break Some(Program { stmts, eof });
             } else if let Some(stmt) = self.declaration() {
                 stmts.push(stmt);
@@ -181,8 +185,8 @@ impl Parser {
     }
 
     fn decl_stmt(&mut self) -> Option<Stmt> {
-        let var = self.expect::<Var>()?;
-        let Some(ident) = self.expect() else {
+        let var = self.try_next::<Var>()?;
+        let Some(ident) = self.try_next() else {
             self.errors.push(ParseError::ExpectedIdent {
                 stmt: var.span(),
                 next: self.peek().span(),
@@ -190,14 +194,14 @@ impl Parser {
             return None;
         };
 
-        let assignment = if let Some(equal) = self.expect() {
+        let assignment = if let Some(equal) = self.try_next() {
             let expr = self.expression()?;
             Some((equal, expr))
         } else {
             None
         };
 
-        let Some(semi) = self.expect() else {
+        let Some(semi) = self.try_next() else {
             let stmt = if let Some((_, expr)) = &assignment {
                 Span::across(&var, expr)
             } else {
@@ -229,13 +233,13 @@ impl Parser {
     }
 
     fn if_stmt(&mut self) -> Option<Stmt> {
-        let if_ = self.expect()?;
+        let if_ = self.try_next()?;
 
         let group = self.grouped()?;
         let then = self.statement()?;
 
         let mut else_ = None;
-        if let Some(else_token) = self.expect() {
+        if let Some(else_token) = self.try_next() {
             else_ = Some((else_token, Box::new(self.statement()?)));
         }
 
@@ -248,9 +252,9 @@ impl Parser {
     }
 
     fn print_stmt(&mut self) -> Option<Stmt> {
-        let print = self.expect()?;
+        let print = self.try_next()?;
         let expr = self.expression()?;
-        let Some(semi) = self.expect() else {
+        let Some(semi) = self.try_next() else {
             self.errors.push(ParseError::UnterminatedStatement {
                 stmt: Span::across(&print, &expr),
                 next: self.peek().span(),
@@ -262,7 +266,7 @@ impl Parser {
     }
 
     fn block_stmt(&mut self) -> Option<Stmt> {
-        let lbrace = self.expect::<LeftBrace>()?;
+        let lbrace = self.try_next::<LeftBrace>()?;
         let mut stmts = Vec::new();
 
         loop {
@@ -281,7 +285,7 @@ impl Parser {
             }
         }
 
-        let rbrace = self.expect()?;
+        let rbrace = self.try_next()?;
 
         Some(Stmt::Block(BlockStmt {
             lbrace,
@@ -292,7 +296,7 @@ impl Parser {
 
     fn expr_stmt(&mut self) -> Option<Stmt> {
         let expr = self.expression()?;
-        let Some(semi) = self.expect() else {
+        let Some(semi) = self.try_next() else {
             self.errors.push(ParseError::UnterminatedStatement {
                 stmt: expr.span(),
                 next: self.peek().span(),
@@ -310,7 +314,7 @@ impl Parser {
     fn assignment(&mut self) -> Option<Expr> {
         let expr = self.equality()?;
 
-        if let Some(equal) = self.expect() {
+        if let Some(equal) = self.try_next() {
             let value = self.assignment()?;
 
             if let Expr::Variable(VariableExpr { decoration, ident }) = expr {
@@ -334,7 +338,7 @@ impl Parser {
         self.parse_left_binary(
             |this| match this.peek() {
                 Token::BangEqual(_) | Token::EqualEqual(_) => {
-                    Some(this.expect().unwrap())
+                    Some(this.expect())
                 }
                 _ => None,
             },
@@ -348,7 +352,7 @@ impl Parser {
                 Token::Greater(_)
                 | Token::GreaterEqual(_)
                 | Token::Less(_)
-                | Token::LessEqual(_) => Some(this.expect().unwrap()),
+                | Token::LessEqual(_) => Some(this.expect()),
                 _ => None,
             },
             |this| this.term(),
@@ -358,9 +362,7 @@ impl Parser {
     fn term(&mut self) -> Option<Expr> {
         self.parse_left_binary(
             |this| match this.peek() {
-                Token::Minus(_) | Token::Plus(_) => {
-                    Some(this.expect().unwrap())
-                }
+                Token::Minus(_) | Token::Plus(_) => Some(this.expect()),
                 _ => None,
             },
             |this| this.factor(),
@@ -370,9 +372,7 @@ impl Parser {
     fn factor(&mut self) -> Option<Expr> {
         self.parse_left_binary(
             |this| match this.peek() {
-                Token::Slash(_) | Token::Star(_) => {
-                    Some(this.expect().unwrap())
-                }
+                Token::Slash(_) | Token::Star(_) => Some(this.expect()),
                 _ => None,
             },
             |this| this.unary(),
@@ -380,7 +380,7 @@ impl Parser {
     }
 
     fn unary(&mut self) -> Option<Expr> {
-        if let Some(operator) = self.expect() {
+        if let Some(operator) = self.try_next() {
             Some(Expr::Unary(UnaryExpr {
                 operator,
                 inner: Box::new(self.unary()?),
@@ -397,12 +397,12 @@ impl Parser {
             | Token::True(_)
             | Token::False(_)
             | Token::Nil(_) => Some(Expr::Literal(LiteralExpr {
-                literal: self.expect().unwrap(),
+                literal: self.expect(),
             })),
             Token::LeftParen(_) => self.grouped().map(Expr::Grouping),
             Token::Identifier(_) => Some(Expr::Variable(VariableExpr {
                 decoration: self.decorator.decorate(),
-                ident: self.expect().unwrap(),
+                ident: self.expect(),
             })),
             _ => {
                 self.errors
@@ -413,7 +413,7 @@ impl Parser {
     }
 
     fn grouped(&mut self) -> Option<GroupingExpr> {
-        let Some(lparen) = self.expect() else {
+        let Some(lparen) = self.try_next() else {
             self.errors
                 .push(ParseError::ExpectedLeftParen(self.peek().span()));
             return None;
@@ -428,7 +428,7 @@ impl Parser {
             Token::RightParen(_) => Some(GroupingExpr {
                 lparen,
                 inner: Box::new(inner),
-                rparen: self.expect().unwrap(),
+                rparen: self.expect(),
             }),
             _ => {
                 self.errors.push(ParseError::UnterminatedGroup(Span::across(
