@@ -174,6 +174,16 @@ macro_rules! ast_node {
     };
     (@span_start
         $self:ident
+        $first:ident: Punctuated,
+        $($rest:ident: $rest_ty:ident,)*
+    ) => {
+        if let Some(span_start) = $self.$first.span_start() {
+            return span_start;
+        }
+        ast_node!(@span_start $self $($rest: $rest_ty,)*);
+    };
+    (@span_start
+        $self:ident
         $first:ident: $first_ty:ident,
         $($rest:ident: $rest_ty:ident,)*
     ) => {
@@ -209,6 +219,16 @@ macro_rules! ast_node {
     };
     (@span_end
         $self:ident
+        $first:ident: Punctuated,
+        $($rest:ident: $rest_ty:ident,)*
+    ) => {
+        ast_node!(@span_end $self $($rest: $rest_ty,)*);
+        if let Some(span_end) = $self.$first.span_end() {
+            return span_end;
+        }
+    };
+    (@span_end
+        $self:ident
         $first:ident: $first_ty:ident,
         $($rest:ident: $rest_ty:ident,)*
     ) => {
@@ -219,4 +239,5 @@ macro_rules! ast_node {
 
 pub mod decoration;
 pub mod expr;
+pub mod punctuated;
 pub mod stmt;

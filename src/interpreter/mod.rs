@@ -2,23 +2,25 @@ mod error;
 mod eval;
 mod name_resolution;
 
-use core::mem::take;
-use std::collections::HashMap;
+use std::{collections::HashMap, time::SystemTime};
 
 pub use self::error::InterpretError;
 use crate::{
     ast::{
         expr::{
-            AssignExpr, BinaryExpr, BinaryOperator, Expr, ExprVisitor,
-            GroupingExpr, Literal, LiteralExpr, UnaryExpr, UnaryOperator,
-            VariableExpr, VisitExpr,
+            AssignExpr, BinaryExpr, BinaryOperator, CallExpr, Expr,
+            ExprVisitor, GroupingExpr, Literal, LiteralExpr, UnaryExpr,
+            UnaryOperator, VariableExpr, VisitExpr,
         },
         stmt::{
-            BlockStmt, DeclStmt, ExprStmt, IfStmt, PrintStmt, Program,
+            BlockStmt, DeclStmt, ExprStmt, IfStmt, PrintStmt, Program, Repl,
             StmtVisitor, VisitStmt as _,
         },
     },
-    interpreter::{eval::Value, name_resolution::NameResolution},
+    interpreter::{
+        eval::{Function, Value},
+        name_resolution::NameResolution,
+    },
     span::Spanned,
 };
 
@@ -42,6 +44,12 @@ impl<T> Environment<T> {
     fn new() -> Self {
         Self {
             scopes: vec![Scope::new()],
+        }
+    }
+
+    fn from_scope(scope: Scope<T>) -> Self {
+        Self {
+            scopes: vec![scope],
         }
     }
 }
@@ -86,9 +94,16 @@ pub struct Interpreter {
 
 impl Interpreter {
     pub fn new() -> Self {
+        let mut globals = Scope::new();
+        globals
+            .names
+            .insert("clock".to_string(), Value::Function(Function::Clock));
+
+        let name_resolution = NameResolution::new(&globals);
+
         Self {
-            values: Environment::new(),
-            name_resolution: NameResolution::new(),
+            values: Environment::from_scope(globals),
+            name_resolution,
         }
     }
 
@@ -100,10 +115,7 @@ impl Interpreter {
             stmt.accept(&mut self.name_resolution);
         }
 
-        if !self.name_resolution.errors.is_empty() {
-            let errors = take(&mut self.name_resolution.errors);
-            return Err(errors);
-        }
+        self.name_resolution.take_errors()?;
 
         for stmt in &program.stmts {
             stmt.accept(self).map_err(|e| vec![e])?;
@@ -112,7 +124,30 @@ impl Interpreter {
         Ok(())
     }
 
-    pub fn eval(&mut self, expr: &Expr) -> Result<Value, InterpretError> {
+    pub fn repl(
+        &mut self,
+        repl: &Repl,
+    ) -> Result<Option<Value>, Vec<InterpretError>> {
+        match repl {
+            Repl::Expr(expr) => expr.accept(&mut self.name_resolution),
+            Repl::Stmt(stmt) => stmt.accept(&mut self.name_resolution),
+        }
+
+        self.name_resolution.take_errors()?;
+
+        match repl {
+            Repl::Expr(expr) => {
+                let value = expr.accept(self).map_err(|e| vec![e])?;
+                Ok(Some(value))
+            }
+            Repl::Stmt(stmt) => {
+                stmt.accept(self).map_err(|e| vec![e])?;
+                Ok(None)
+            }
+        }
+    }
+
+    fn eval(&mut self, expr: &Expr) -> Result<Value, InterpretError> {
         expr.accept(self)
     }
 }
@@ -242,6 +277,36 @@ impl ExprVisitor for Interpreter {
         self.values.set(&expr.ident.value, depth, value.clone());
 
         Ok(value)
+    }
+
+    fn visit_call_expr(&mut self, expr: &CallExpr) -> Self::Output {
+        let callee = self.eval_function(&expr.function)?;
+
+        let arity = match callee {
+            Function::Clock => 0,
+        };
+        if arity != expr.arguments.len() {
+            return Err(InterpretError::IncorrectFunctionArity {
+                span: expr.span(),
+                callee,
+                expected: arity,
+                actual: expr.arguments.len(),
+            });
+        }
+
+        let mut arguments = Vec::new();
+        for argument in expr.arguments.iter() {
+            arguments.push(self.eval(argument)?);
+        }
+
+        match callee {
+            Function::Clock => Ok(Value::Number(
+                SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs_f64(),
+            )),
+        }
     }
 }
 

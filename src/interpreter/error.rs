@@ -2,19 +2,43 @@ use core::fmt;
 
 use crate::{
     diagnostic::{Context, Diagnostic},
-    interpreter::eval::Value,
+    interpreter::eval::{Function, Value},
     span::Span,
 };
 
 #[derive(Debug)]
 pub enum InterpretError {
-    ExpectedBoolean { span: Span, actual: Value },
-    ExpectedNumber { span: Span, actual: Value },
-    ExpectedString { span: Span, actual: Value },
-    ExpectedNumberOrString { span: Span, actual: Value },
+    ExpectedBoolean {
+        span: Span,
+        actual: Value,
+    },
+    ExpectedNumber {
+        span: Span,
+        actual: Value,
+    },
+    ExpectedString {
+        span: Span,
+        actual: Value,
+    },
+    ExpectedNumberOrString {
+        span: Span,
+        actual: Value,
+    },
+    ExpectedFunction {
+        span: Span,
+        actual: Value,
+    },
     DivideByZero(Span),
-    UndefinedVariable { span: Span },
+    UndefinedVariable {
+        span: Span,
+    },
     UninitializedVariable(Span),
+    IncorrectFunctionArity {
+        span: Span,
+        callee: Function,
+        expected: usize,
+        actual: usize,
+    },
 }
 
 impl Diagnostic for InterpretError {
@@ -85,6 +109,22 @@ impl Diagnostic for InterpretError {
                     ),
                 )?;
             }
+            Self::ExpectedFunction { span, actual } => {
+                c.error(
+                    f,
+                    format_args!(
+                        "expected callee expression to evaluate to a function"
+                    ),
+                )?;
+                c.span(
+                    *span,
+                    f,
+                    format_args!(
+                        "this expression evaluated to '{actual}' instead of a \
+                         function"
+                    ),
+                )?;
+            }
             Self::DivideByZero(span) => {
                 c.error(f, format_args!("attempted to divide by zero"))?;
                 c.span(
@@ -119,6 +159,25 @@ impl Diagnostic for InterpretError {
                         "'{}' was declared, but wasn't assigned a value \
                          before being used here",
                         span.get(c.source())
+                    ),
+                )?;
+            }
+            Self::IncorrectFunctionArity {
+                span,
+                callee,
+                expected,
+                actual,
+            } => {
+                c.error(
+                    f,
+                    format_args!("function callee has incorrect arity"),
+                )?;
+                c.span(
+                    *span,
+                    f,
+                    format_args!(
+                        "'{callee}' has arity {expected}, but was called with \
+                         arity {actual}"
                     ),
                 )?;
             }

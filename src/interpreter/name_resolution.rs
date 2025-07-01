@@ -1,3 +1,4 @@
+use core::mem::take;
 use std::collections::HashMap;
 
 use crate::{
@@ -12,22 +13,36 @@ use crate::{
             VisitStmt as _,
         },
     },
-    interpreter::{Environment, InterpretError},
+    interpreter::{eval::Value, Environment, InterpretError, Scope},
     span::Spanned as _,
 };
 
 pub struct NameResolution {
     names: Environment<()>,
     resolutions: HashMap<Decoration, usize>,
-    pub errors: Vec<InterpretError>,
+    errors: Vec<InterpretError>,
 }
 
 impl NameResolution {
-    pub fn new() -> Self {
+    pub fn new(global_scope: &Scope<Value>) -> Self {
+        let mut names = Environment::new();
+
+        for name in global_scope.names.keys() {
+            names.define(name.clone(), ());
+        }
+
         Self {
-            names: Environment::new(),
+            names,
             resolutions: HashMap::new(),
             errors: Vec::new(),
+        }
+    }
+
+    pub fn take_errors(&mut self) -> Result<(), Vec<InterpretError>> {
+        if self.errors.is_empty() {
+            Ok(())
+        } else {
+            Err(take(&mut self.errors))
         }
     }
 
@@ -102,5 +117,15 @@ impl ExprVisitor for NameResolution {
 
     fn visit_assign_expr(&mut self, expr: &AssignExpr) -> Self::Output {
         expr.expr.accept(self);
+    }
+
+    fn visit_call_expr(
+        &mut self,
+        expr: &crate::ast::expr::CallExpr,
+    ) -> Self::Output {
+        expr.function.accept(self);
+        for argument in expr.arguments.iter() {
+            argument.accept(self);
+        }
     }
 }

@@ -1,9 +1,9 @@
 use crate::{
-    ast::decoration::Decoration,
+    ast::{decoration::Decoration, punctuated::Punctuated},
     scanner::{
-        Bang, BangEqual, Equal, EqualEqual, False, Greater, GreaterEqual,
-        Identifier, LeftParen, Less, LessEqual, Minus, Nil, Number, Plus,
-        RightParen, Slash, Star, String, True,
+        Bang, BangEqual, Comma, Equal, EqualEqual, False, Greater,
+        GreaterEqual, Identifier, LeftParen, Less, LessEqual, Minus, Nil,
+        Number, Plus, RightParen, Slash, Star, String, True,
     },
 };
 
@@ -16,6 +16,7 @@ pub trait ExprVisitor {
     fn visit_grouping_expr(&mut self, expr: &GroupingExpr) -> Self::Output;
     fn visit_variable_expr(&mut self, expr: &VariableExpr) -> Self::Output;
     fn visit_assign_expr(&mut self, expr: &AssignExpr) -> Self::Output;
+    fn visit_call_expr(&mut self, expr: &CallExpr) -> Self::Output;
 }
 
 pub trait VisitExpr<V: ExprVisitor> {
@@ -31,6 +32,7 @@ ast_node! {
         Grouping(GroupingExpr),
         Variable(VariableExpr),
         Assign(AssignExpr),
+        Call(CallExpr),
     }
 
     #[visit(VisitExpr, ExprVisitor::visit_literal_expr)]
@@ -103,5 +105,13 @@ ast_node! {
         pub ident: Identifier,
         pub equal: Equal,
         pub expr: Box<Expr>,
+    }
+
+    #[visit(VisitExpr, ExprVisitor::visit_call_expr)]
+    pub struct CallExpr {
+        pub function: Box<Expr>,
+        pub lparen: LeftParen,
+        pub arguments: Punctuated<Expr, Comma>,
+        pub rparen: RightParen,
     }
 }

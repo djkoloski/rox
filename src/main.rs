@@ -7,7 +7,6 @@ use std::{
 };
 
 use rox::{
-    ast::stmt::{Repl, VisitStmt as _},
     diagnostic::{Context, Diagnostic},
     interpreter::Interpreter,
     parser::Parser,
@@ -141,13 +140,11 @@ fn run_prompt() -> Result<(), Error> {
             continue;
         }
 
-        match &repl.unwrap() {
-            Repl::Expr(expr) => match interpreter.eval(expr) {
-                Ok(value) => println!("{value}"),
-                Err(error) => emit(&line, &error),
-            },
-            Repl::Stmt(stmt) => {
-                if let Err(error) = stmt.accept(&mut interpreter) {
+        match interpreter.repl(&repl.unwrap()) {
+            Ok(None) => (),
+            Ok(Some(value)) => println!("{value}"),
+            Err(errors) => {
+                for error in errors {
                     emit(&line, &error);
                 }
             }

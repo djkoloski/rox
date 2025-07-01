@@ -4,16 +4,17 @@ use crate::{
     ast::{
         decoration::Decorator,
         expr::{
-            AssignExpr, BinaryExpr, BinaryOperator, Expr, GroupingExpr,
-            LiteralExpr, UnaryExpr, VariableExpr,
+            AssignExpr, BinaryExpr, BinaryOperator, CallExpr, Expr,
+            GroupingExpr, LiteralExpr, UnaryExpr, VariableExpr,
         },
+        punctuated::Punctuated,
         stmt::{
             BlockStmt, DeclStmt, ExprStmt, IfStmt, PrintStmt, Program, Repl,
             Stmt,
         },
     },
     diagnostic::{Context, Diagnostic},
-    scanner::{LeftBrace, Token, TokenKind, Var},
+    scanner::{LeftBrace, RightParen, Semicolon, Token, TokenKind, Var},
     span::{Span, Spanned as _},
 };
 
@@ -25,6 +26,7 @@ pub enum ParseError {
     UnterminatedBlock(Span),
     ExpectedIdent { stmt: Span, next: Span },
     ExpectedLeftParen(Span),
+    ExpectedRightParen(Span),
     InvalidAssignmentTarget(Span),
 }
 
@@ -92,6 +94,16 @@ impl Diagnostic for ParseError {
                     f,
                     format_args!("expected a left parenthesis here"),
                 )?;
+            }
+            Self::ExpectedRightParen(span) => {
+                c.error(
+                    f,
+                    format_args!(
+                        "expected right parenthesis after function call \
+                         arguments"
+                    ),
+                )?;
+                c.span(*span, f, format_args!("expected a ')' here"))?;
             }
             Self::InvalidAssignmentTarget(span) => {
                 c.error(f, format_args!("invalid assignment target"))?;
@@ -162,7 +174,7 @@ impl Parser {
             } else if let Some(stmt) = self.declaration() {
                 stmts.push(stmt);
             } else {
-                self.synchronize(|token| matches!(token, Token::Semicolon(_)));
+                self.synchronize::<Semicolon>();
             }
         }
     }
@@ -386,7 +398,38 @@ impl Parser {
                 inner: Box::new(self.unary()?),
             }))
         } else {
-            self.primary()
+            self.call()
+        }
+    }
+
+    fn call(&mut self) -> Option<Expr> {
+        let expr = self.primary()?;
+        if let Some(lparen) = self.try_next() {
+            let mut arguments = Punctuated::new();
+            while !matches!(self.peek(), Token::RightParen(_)) {
+                arguments.push(self.expression()?);
+                if matches!(self.peek(), Token::Comma(_)) {
+                    arguments.push_punct(self.expect());
+                } else {
+                    break;
+                }
+            }
+
+            let Some(rparen) = self.try_next() else {
+                self.errors
+                    .push(ParseError::ExpectedRightParen(self.peek().span()));
+                self.synchronize::<RightParen>();
+                return None;
+            };
+
+            Some(Expr::Call(CallExpr {
+                function: Box::new(expr),
+                lparen,
+                arguments,
+                rparen,
+            }))
+        } else {
+            Some(expr)
         }
     }
 
@@ -420,7 +463,7 @@ impl Parser {
         };
 
         let Some(inner) = self.expression() else {
-            self.synchronize(|kind| matches!(kind, Token::RightParen(_)));
+            self.synchronize::<RightParen>();
             return None;
         };
 
@@ -435,16 +478,16 @@ impl Parser {
                     &lparen, &inner,
                 )));
 
-                self.synchronize(|kind| matches!(kind, Token::RightParen(_)));
+                self.synchronize::<RightParen>();
 
                 None
             }
         }
     }
 
-    fn synchronize(&mut self, matches: impl Fn(&Token) -> bool) {
+    fn synchronize<T: TokenKind>(&mut self) {
         while !matches!(self.peek(), Token::Eof(_)) {
-            if matches(&self.next()) {
+            if T::matches_token(&self.next()) {
                 break;
             }
         }
