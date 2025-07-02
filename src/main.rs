@@ -1,4 +1,3 @@
-use core::ops::ControlFlow;
 use std::{
     env::args_os,
     fs,
@@ -9,7 +8,7 @@ use std::{
 };
 
 use rox::{
-    ast::{decoration::Decorator, stmt::Repl},
+    ast::decoration::Decorator,
     compiler::Compiler,
     diagnostic::{Context, Diagnostic},
     interpreter::{
@@ -185,16 +184,11 @@ fn run_prompt() -> Result<(), Error> {
         }
 
         let mut interpreter = Interpreter::new(&compiler, environment.clone());
-        match &repl {
-            Repl::Expr(expr) => match interpreter.eval(expr) {
-                Ok(value) => println!("{value}"),
-                Err(error) => emit(&line, &error),
-            },
-            Repl::Stmt(stmt) => match interpreter.step(stmt) {
-                ControlFlow::Continue(()) => (),
-                ControlFlow::Break(Ok(value)) => println!("returned {value}"),
-                ControlFlow::Break(Err(error)) => emit(&line, &error),
-            },
+
+        match interpreter.repl(&repl) {
+            Err(error) => emit(&line, &error),
+            Ok(None) => (),
+            Ok(Some(value)) => println!("{value}"),
         }
 
         println!();

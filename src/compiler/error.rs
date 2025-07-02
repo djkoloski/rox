@@ -8,6 +8,7 @@ use crate::{
 #[derive(Debug)]
 pub enum CompileError {
     UndefinedVariable { span: Span },
+    TopLevelReturn { span: Span },
 }
 
 impl Diagnostic for CompileError {
@@ -29,6 +30,16 @@ impl Diagnostic for CompileError {
                     *span,
                     f,
                     format_args!("this variable has not been defined"),
+                )?;
+            }
+            Self::TopLevelReturn { span } => {
+                c.error(f, format_args!("return statement in top-level code"))?;
+                c.span(
+                    *span,
+                    f,
+                    format_args!(
+                        "this `return` should be contained in a function"
+                    ),
                 )?;
             }
         }

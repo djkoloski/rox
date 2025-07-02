@@ -13,9 +13,8 @@ use crate::{
             UnaryOperator, VariableExpr, VisitExpr as _,
         },
         stmt::{
-            BlockStmt, ExprStmt, FunDeclStmt, IfStmt, PrintStmt, Program,
-            ReturnStmt, Stmt, StmtVisitor, VarDeclStmt, VisitStmt as _,
-            WhileStmt,
+            BlockStmt, ExprStmt, FunDeclStmt, IfStmt, PrintStmt, Program, Repl,
+            ReturnStmt, StmtVisitor, VarDeclStmt, VisitStmt as _, WhileStmt,
         },
     },
     compiler::Compiler,
@@ -43,24 +42,30 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    pub fn execute(
-        &mut self,
-        program: &Program,
-    ) -> Result<Value, InterpretError> {
+    pub fn execute(&mut self, program: &Program) -> Result<(), InterpretError> {
         for stmt in &program.stmts {
-            if let Some(result) = self.step(stmt).break_value() {
-                return result;
+            if let Some(result) = stmt.accept(self).break_value() {
+                return Err(result.unwrap_err());
             }
         }
 
-        Ok(Value::Nil)
+        Ok(())
     }
 
-    pub fn step(
+    pub fn repl(
         &mut self,
-        stmt: &Stmt,
-    ) -> ControlFlow<Result<Value, InterpretError>> {
-        stmt.accept(self)
+        repl: &Repl,
+    ) -> Result<Option<Value>, InterpretError> {
+        match repl {
+            Repl::Stmt(stmt) => {
+                if let Some(result) = stmt.accept(self).break_value() {
+                    Err(result.unwrap_err())
+                } else {
+                    Ok(None)
+                }
+            }
+            Repl::Expr(expr) => expr.accept(self).map(Some),
+        }
     }
 
     pub fn eval(&mut self, expr: &Expr) -> Result<Value, InterpretError> {

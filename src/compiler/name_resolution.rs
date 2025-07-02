@@ -138,6 +138,11 @@ impl StmtVisitor for NameResolutionPass<'_> {
 
     fn visit_return_stmt(&mut self, stmt: &ReturnStmt) -> Self::Output {
         if let Some(expr) = &stmt.expr {
+            if self.locals.is_empty() {
+                self.errors.push(CompileError::TopLevelReturn {
+                    span: stmt.return_.span(),
+                });
+            }
             expr.accept(self);
         }
     }
