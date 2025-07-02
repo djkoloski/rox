@@ -5,7 +5,7 @@ use crate::{
         decoration::Decorator,
         expr::{
             AssignExpr, BinaryExpr, BinaryOperator, CallExpr, Expr,
-            GroupingExpr, LiteralExpr, UnaryExpr, VariableExpr,
+            GroupingExpr, Literal, LiteralExpr, UnaryExpr, VariableExpr,
         },
         punctuated::Punctuated,
         stmt::{
@@ -14,7 +14,10 @@ use crate::{
         },
     },
     diagnostic::{Context, Diagnostic},
-    scanner::{Fun, LeftBrace, RightParen, Semicolon, Token, TokenKind, Var},
+    scanner::{
+        For, Fun, LeftBrace, RightBrace, RightParen, Semicolon, Token,
+        TokenKind, True, Var, While,
+    },
     span::{Span, Spanned as _},
 };
 
@@ -28,6 +31,7 @@ pub enum ParseError {
     ExpectedLeftParen(Span),
     ExpectedRightParen(Span),
     InvalidAssignmentTarget(Span),
+    ExpectedSemicolon(Span),
 }
 
 impl Diagnostic for ParseError {
@@ -106,6 +110,10 @@ impl Diagnostic for ParseError {
                     ),
                 )?;
             }
+            Self::ExpectedSemicolon(span) => {
+                c.error(f, format_args!("missing semicolon"))?;
+                c.span(*span, f, format_args!("expected a semicolon here"))?;
+            }
         }
         Ok(())
     }
@@ -182,13 +190,13 @@ impl<'a> Parser<'a> {
 
     fn declaration(&mut self) -> Option<Stmt> {
         match self.peek() {
-            Token::Var(_) => self.var_decl_stmt(),
-            Token::Fun(_) => self.fun_decl_stmt(),
+            Token::Var(_) => Some(self.var_decl_stmt()?.into()),
+            Token::Fun(_) => Some(self.fun_decl_stmt()?.into()),
             _ => self.statement(),
         }
     }
 
-    fn var_decl_stmt(&mut self) -> Option<Stmt> {
+    fn var_decl_stmt(&mut self) -> Option<VarDeclStmt> {
         let var = self.try_next::<Var>()?;
         let Some(ident) = self.try_next() else {
             self.errors.push(ParseError::ExpectedIdent {
@@ -219,15 +227,15 @@ impl<'a> Parser<'a> {
             return None;
         };
 
-        Some(Stmt::VarDecl(VarDeclStmt {
+        Some(VarDeclStmt {
             var,
             ident,
             assignment,
             semi,
-        }))
+        })
     }
 
-    fn fun_decl_stmt(&mut self) -> Option<Stmt> {
+    fn fun_decl_stmt(&mut self) -> Option<FunDeclStmt> {
         let fun = self.try_next::<Fun>()?;
         let Some(name) = self.try_next() else {
             self.errors.push(ParseError::ExpectedIdent {
@@ -269,7 +277,7 @@ impl<'a> Parser<'a> {
 
         let body = self.block_stmt()?;
 
-        Some(Stmt::FunDecl(FunDeclStmt {
+        Some(FunDeclStmt {
             decoration: self.decorator.decorate(),
             fun,
             name,
@@ -277,7 +285,7 @@ impl<'a> Parser<'a> {
             params,
             rparen,
             body,
-        }))
+        })
     }
 
     fn statement(&mut self) -> Option<Stmt> {
@@ -285,6 +293,7 @@ impl<'a> Parser<'a> {
             Token::If(_) => self.if_stmt()?.into(),
             Token::Print(_) => self.print_stmt()?.into(),
             Token::While(_) => self.while_stmt()?.into(),
+            Token::For(_) => self.for_stmt()?,
             Token::LeftBrace(_) => self.block_stmt()?.into(),
             _ => self.expr_stmt()?.into(),
         })
@@ -345,6 +354,87 @@ impl<'a> Parser<'a> {
             rparen,
             body: Box::new(body),
         })
+    }
+
+    fn for_stmt(&mut self) -> Option<Stmt> {
+        let for_ = self.try_next::<For>()?;
+        let Some(lparen) = self.try_next() else {
+            self.errors
+                .push(ParseError::ExpectedLeftParen(self.peek().span()));
+            return None;
+        };
+
+        let initializer = match self.peek() {
+            Token::Semicolon(_) => {
+                self.next();
+                None
+            }
+            Token::Var(_) => Some(self.var_decl_stmt()?.into()),
+            _ => Some(self.expr_stmt()?.into()),
+        };
+
+        let expr = match self.peek() {
+            Token::Semicolon(_) => Expr::Literal(LiteralExpr {
+                literal: Literal::True(True { span: for_.span() }),
+            }),
+            _ => {
+                let expr = self.expression()?;
+                let Some(_) = self.try_next::<Semicolon>() else {
+                    self.errors.push(ParseError::ExpectedSemicolon(
+                        self.peek().span(),
+                    ));
+                    return None;
+                };
+                expr
+            }
+        };
+
+        let increment = match self.peek() {
+            Token::RightParen(_) => None,
+            _ => Some(self.expression()?),
+        };
+
+        let Some(rparen) = self.try_next() else {
+            self.errors
+                .push(ParseError::ExpectedRightParen(self.peek().span()));
+            return None;
+        };
+
+        let mut body = self.statement()?;
+        if let Some(increment) = increment {
+            body = Stmt::Block(BlockStmt {
+                lbrace: LeftBrace { span: for_.span() },
+                stmts: vec![
+                    body,
+                    Stmt::Expr(ExprStmt {
+                        expr: increment,
+                        semi: Semicolon { span: for_.span() },
+                    }),
+                ],
+                rbrace: RightBrace { span: for_.span() },
+            });
+        }
+
+        let mut stmts = Vec::new();
+        if let Some(initializer) = initializer {
+            stmts.push(initializer);
+        }
+        stmts.push(
+            WhileStmt {
+                while_: While { span: for_.span() },
+                lparen,
+                expr,
+                rparen,
+                body: Box::new(body),
+            }
+            .into(),
+        );
+
+        Some(Stmt::Block(BlockStmt {
+            lbrace: LeftBrace { span: for_.span() },
+            stmts,
+            rbrace: RightBrace { span: for_.span() },
+        }))
     }
 
     fn block_stmt(&mut self) -> Option<BlockStmt> {
