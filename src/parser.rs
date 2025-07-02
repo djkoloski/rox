@@ -611,8 +611,9 @@ impl<'a> Parser<'a> {
     }
 
     fn call(&mut self) -> Option<Expr> {
-        let expr = self.primary()?;
-        if let Some(lparen) = self.try_next() {
+        let mut expr = self.primary()?;
+
+        while let Some(lparen) = self.try_next() {
             let mut arguments = Punctuated::new();
             while !matches!(self.peek(), Token::RightParen(_)) {
                 arguments.push(self.expression()?);
@@ -630,15 +631,15 @@ impl<'a> Parser<'a> {
                 return None;
             };
 
-            Some(Expr::Call(CallExpr {
+            expr = Expr::Call(CallExpr {
                 function: Box::new(expr),
                 lparen,
                 arguments,
                 rparen,
-            }))
-        } else {
-            Some(expr)
+            });
         }
+
+        Some(expr)
     }
 
     fn primary(&mut self) -> Option<Expr> {

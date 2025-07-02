@@ -1,0 +1,5 @@
+fun get_clock() {
+    return clock;
+}
+
+print get_clock()();
