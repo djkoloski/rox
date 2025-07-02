@@ -1,6 +1,9 @@
 use core::fmt;
+use std::sync::Arc;
 
-use crate::ast::decoration::Decoration;
+use crate::{
+    ast::decoration::Decoration, interpreter::environment::Environment,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -42,20 +45,32 @@ impl Value {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum Function {
-    Clock,
-    Decl(Decoration),
+#[derive(Debug, Clone)]
+pub struct Function {
+    pub kind: FunctionKind,
+    pub environment: Arc<Environment>,
+}
+
+impl PartialEq for Function {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind
+    }
 }
 
 // TODO: need interpreter context for proper function display
 impl fmt::Display for Function {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Clock => write!(f, "<builtin fun clock()>")?,
-            Self::Decl(decl) => write!(f, "<decl fun {decl:?}>")?,
+        match self.kind {
+            FunctionKind::Clock => write!(f, "<builtin fun clock()>")?,
+            FunctionKind::Decl(decl) => write!(f, "<decl fun {decl:?}>")?,
         }
 
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum FunctionKind {
+    Clock,
+    Decl(Decoration),
 }

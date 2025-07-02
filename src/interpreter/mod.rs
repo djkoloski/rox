@@ -1,8 +1,9 @@
+pub mod environment;
 mod error;
 pub mod value;
 
 use core::ops::ControlFlow;
-use std::{collections::HashMap, time::SystemTime};
+use std::{sync::Arc, time::SystemTime};
 
 use crate::{
     ast::{
@@ -19,27 +20,26 @@ use crate::{
     },
     compiler::Compiler,
     interpreter::{
+        environment::Environment,
         error::InterpretError,
-        value::{Function, Value},
+        value::{Function, FunctionKind, Value},
     },
     span::Spanned as _,
 };
 
 pub struct Interpreter<'a> {
     compiler: &'a Compiler,
-    globals: &'a mut HashMap<String, Value>,
-    locals: Vec<HashMap<String, Value>>,
+    environment: Arc<Environment>,
 }
 
 impl<'a> Interpreter<'a> {
     pub fn new(
         interpreter: &'a Compiler,
-        globals: &'a mut HashMap<String, Value>,
+        environment: Arc<Environment>,
     ) -> Self {
         Self {
             compiler: interpreter,
-            globals,
-            locals: Vec::new(),
+            environment,
         }
     }
 
@@ -100,36 +100,12 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn get(&self, name: &str, depth: usize) -> Option<Value> {
-        if depth == 0 {
-            self.globals.get(name).cloned()
-        } else {
-            self.locals[depth - 1].get(name).cloned()
-        }
-    }
-
-    fn set(&mut self, name: &str, depth: usize, value: Value) {
-        if depth == 0 {
-            *self.globals.get_mut(name).unwrap() = value;
-        } else {
-            *self.locals[depth - 1].get_mut(name).unwrap() = value;
-        }
-    }
-
-    fn define(&mut self, name: String, value: Value) {
-        if let Some(local) = self.locals.last_mut() {
-            local.insert(name, value);
-        } else {
-            self.globals.insert(name, value);
-        }
-    }
-
     fn push(&mut self) {
-        self.locals.push(HashMap::new());
+        self.environment = Environment::with_parent(self.environment.clone());
     }
 
     fn pop(&mut self) {
-        self.locals.pop();
+        self.environment = self.environment.parent().unwrap().clone();
     }
 }
 
@@ -252,7 +228,7 @@ impl ExprVisitor for Interpreter<'_> {
 
     fn visit_variable_expr(&mut self, expr: &VariableExpr) -> Self::Output {
         let depth = self.compiler.name_resolution.get(expr.decoration).unwrap();
-        let value = self.get(&expr.ident.value, depth).unwrap();
+        let value = self.environment.get(&expr.ident.value, depth).unwrap();
         if matches!(value, Value::Uninitialized) {
             return Err(InterpretError::UninitializedVariable(
                 expr.ident.span(),
@@ -265,7 +241,8 @@ impl ExprVisitor for Interpreter<'_> {
     fn visit_assign_expr(&mut self, expr: &AssignExpr) -> Self::Output {
         let depth = self.compiler.name_resolution.get(expr.decoration).unwrap();
         let value = self.eval(&expr.expr)?;
-        self.set(&expr.ident.value, depth, value.clone());
+        self.environment
+            .set(&expr.ident.value, depth, value.clone());
 
         Ok(value)
     }
@@ -273,9 +250,9 @@ impl ExprVisitor for Interpreter<'_> {
     fn visit_call_expr(&mut self, expr: &CallExpr) -> Self::Output {
         let callee = self.eval_function(&expr.function)?;
 
-        let arity = match callee {
-            Function::Clock => 0,
-            Function::Decl(id) => {
+        let arity = match callee.kind {
+            FunctionKind::Clock => 0,
+            FunctionKind::Decl(id) => {
                 self.compiler.decls.get_fun(id).unwrap().params.len()
             }
         };
@@ -293,25 +270,27 @@ impl ExprVisitor for Interpreter<'_> {
             arguments.push(self.eval(argument)?);
         }
 
-        match callee {
-            Function::Clock => Ok(Value::Number(
+        match callee.kind {
+            FunctionKind::Clock => Ok(Value::Number(
                 SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
                     .unwrap()
                     .as_secs_f64(),
             )),
-            Function::Decl(id) => {
+            FunctionKind::Decl(id) => {
                 let function = self.compiler.decls.get_fun(id).unwrap();
 
                 let mut interpreter =
-                    Interpreter::new(self.compiler, self.globals);
+                    Interpreter::new(self.compiler, callee.environment.clone());
 
                 interpreter.push();
 
                 for (name, argument) in
                     function.params.iter().zip(arguments.into_iter())
                 {
-                    interpreter.define(name.value.clone(), argument);
+                    interpreter
+                        .environment
+                        .define(name.value.clone(), argument);
                 }
 
                 for stmt in &function.body.stmts {
@@ -337,16 +316,19 @@ impl StmtVisitor for Interpreter<'_> {
         } else {
             Value::Uninitialized
         };
-        self.define(stmt.ident.value.clone(), value);
+        self.environment.define(stmt.ident.value.clone(), value);
 
         ControlFlow::Continue(())
     }
 
     fn visit_fun_decl_stmt(&mut self, stmt: &FunDeclStmt) -> Self::Output {
         // TODO: can't reference functions before they're defined
-        self.define(
+        self.environment.define(
             stmt.name.value.clone(),
-            Value::Function(Function::Decl(stmt.decoration)),
+            Value::Function(Function {
+                kind: FunctionKind::Decl(stmt.decoration),
+                environment: self.environment.clone(),
+            }),
         );
 
         ControlFlow::Continue(())

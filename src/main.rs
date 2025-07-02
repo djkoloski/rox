@@ -1,11 +1,11 @@
 use core::ops::ControlFlow;
 use std::{
-    collections::{HashMap, HashSet},
     env::args_os,
     fs,
     io::{self, Write as _},
     path::Path,
     process::exit,
+    sync::Arc,
 };
 
 use rox::{
@@ -13,7 +13,8 @@ use rox::{
     compiler::Compiler,
     diagnostic::{Context, Diagnostic},
     interpreter::{
-        value::{Function, Value},
+        environment::Environment,
+        value::{Function, FunctionKind, Value},
         Interpreter,
     },
     parser::Parser,
@@ -71,13 +72,18 @@ fn cli() -> Result<(), Error> {
     Ok(())
 }
 
-fn make_globals() -> (HashSet<String>, HashMap<String, Value>) {
-    let mut global_values = HashMap::new();
+fn make_globals() -> Arc<Environment> {
+    let environment = Environment::new();
 
-    global_values.insert("clock".to_string(), Value::Function(Function::Clock));
+    environment.define(
+        "clock".to_string(),
+        Value::Function(Function {
+            kind: FunctionKind::Clock,
+            environment: environment.clone(),
+        }),
+    );
 
-    let global_names = global_values.keys().cloned().collect();
-    (global_names, global_values)
+    environment
 }
 
 fn run_file(path: &Path) -> Result<(), Error> {
@@ -107,18 +113,19 @@ fn run_file(path: &Path) -> Result<(), Error> {
 
     let program = program.unwrap();
 
-    let (mut global_names, mut global_values) = make_globals();
+    let environment = make_globals();
+    let mut names = environment.names();
 
     let mut compiler = Compiler::new();
 
-    if let Err(errors) = compiler.compile(&program, &mut global_names) {
+    if let Err(errors) = compiler.compile(&program, &mut names) {
         for error in errors {
             emit(&source, &error);
         }
         return Err(Error::Compile);
     }
 
-    let mut interpreter = Interpreter::new(&compiler, &mut global_values);
+    let mut interpreter = Interpreter::new(&compiler, environment);
 
     if let Err(error) = interpreter.execute(&program) {
         emit(&source, &error);
@@ -130,7 +137,8 @@ fn run_file(path: &Path) -> Result<(), Error> {
 
 fn run_prompt() -> Result<(), Error> {
     let mut decorator = Decorator::new();
-    let (mut global_names, mut global_values) = make_globals();
+    let environment = make_globals();
+    let mut names = environment.names();
 
     let mut compiler = Compiler::new();
 
@@ -169,14 +177,14 @@ fn run_prompt() -> Result<(), Error> {
 
         let repl = repl.unwrap();
 
-        if let Err(errors) = compiler.compile_repl(&repl, &mut global_names) {
+        if let Err(errors) = compiler.compile_repl(&repl, &mut names) {
             for error in errors {
                 emit(&line, &error);
             }
             continue;
         }
 
-        let mut interpreter = Interpreter::new(&compiler, &mut global_values);
+        let mut interpreter = Interpreter::new(&compiler, environment.clone());
         match &repl {
             Repl::Expr(expr) => match interpreter.eval(expr) {
                 Ok(value) => println!("{value}"),

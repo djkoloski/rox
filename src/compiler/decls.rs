@@ -37,6 +37,8 @@ impl StmtVisitor for Decls {
 
     fn visit_fun_decl_stmt(&mut self, stmt: &FunDeclStmt) -> Self::Output {
         self.functions.insert(stmt.decoration, stmt.clone());
+
+        stmt.body.accept(self);
     }
 
     fn visit_expr_stmt(&mut self, _: &ExprStmt) -> Self::Output {}

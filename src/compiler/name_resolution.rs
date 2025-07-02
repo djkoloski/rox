@@ -75,13 +75,13 @@ impl NameResolutionPass<'_> {
     }
 
     fn resolve(&self, name: &str) -> Option<usize> {
-        for (i, scope) in self.locals.iter().enumerate().rev() {
+        for (i, scope) in self.locals.iter().rev().enumerate() {
             if scope.contains(name) {
-                return Some(i + 1);
+                return Some(i);
             }
         }
         if self.globals.contains(name) {
-            return Some(0);
+            return Some(self.locals.len());
         }
         None
     }
