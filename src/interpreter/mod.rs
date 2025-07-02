@@ -1,164 +1,130 @@
 mod error;
-mod eval;
-mod name_resolution;
+pub mod value;
 
 use std::{collections::HashMap, time::SystemTime};
 
-pub use self::error::InterpretError;
 use crate::{
     ast::{
         expr::{
             AssignExpr, BinaryExpr, BinaryOperator, CallExpr, Expr,
             ExprVisitor, GroupingExpr, Literal, LiteralExpr, UnaryExpr,
-            UnaryOperator, VariableExpr, VisitExpr,
+            UnaryOperator, VariableExpr, VisitExpr as _,
         },
         stmt::{
-            BlockStmt, ExprStmt, FunDeclStmt, IfStmt, PrintStmt, Program, Repl,
+            BlockStmt, ExprStmt, FunDeclStmt, IfStmt, PrintStmt, Program, Stmt,
             StmtVisitor, VarDeclStmt, VisitStmt as _,
         },
     },
+    compiler::Compiler,
     interpreter::{
-        eval::{Function, Value},
-        name_resolution::NameResolution,
+        error::InterpretError,
+        value::{Function, Value},
     },
-    span::Spanned,
+    span::Spanned as _,
 };
 
-struct Scope<T> {
-    names: HashMap<String, T>,
+pub struct Interpreter<'a> {
+    compiler: &'a Compiler,
+    globals: &'a mut HashMap<String, Value>,
+    locals: Vec<HashMap<String, Value>>,
 }
 
-impl<T> Scope<T> {
-    fn new() -> Self {
+impl<'a> Interpreter<'a> {
+    pub fn new(
+        interpreter: &'a Compiler,
+        globals: &'a mut HashMap<String, Value>,
+    ) -> Self {
         Self {
-            names: HashMap::new(),
-        }
-    }
-}
-
-struct Environment<T> {
-    scopes: Vec<Scope<T>>,
-}
-
-impl<T> Environment<T> {
-    fn new() -> Self {
-        Self {
-            scopes: vec![Scope::new()],
+            compiler: interpreter,
+            globals,
+            locals: Vec::new(),
         }
     }
 
-    fn from_scope(scope: Scope<T>) -> Self {
-        Self {
-            scopes: vec![scope],
-        }
-    }
-}
-
-impl<T> Environment<T> {
-    fn define(&mut self, name: String, value: T) {
-        self.scopes.last_mut().unwrap().names.insert(name, value);
-    }
-
-    fn resolve(&self, name: &str) -> Option<usize> {
-        for (i, scope) in self.scopes.iter().rev().enumerate() {
-            if scope.names.contains_key(name) {
-                return Some(i);
-            }
-        }
-        None
-    }
-
-    fn get(&self, name: &str, depth: usize) -> Option<&T> {
-        let index = self.scopes.len() - depth - 1;
-        self.scopes[index].names.get(name)
-    }
-
-    fn set(&mut self, name: &str, depth: usize, value: T) {
-        let index = self.scopes.len() - depth - 1;
-        *self.scopes[index].names.get_mut(name).unwrap() = value;
-    }
-
-    fn push(&mut self) {
-        self.scopes.push(Scope::new());
-    }
-
-    fn pop(&mut self) {
-        self.scopes.pop();
-    }
-}
-
-pub struct Interpreter {
-    values: Environment<Value>,
-    name_resolution: NameResolution,
-}
-
-impl Interpreter {
-    pub fn new() -> Self {
-        let mut globals = Scope::new();
-        globals
-            .names
-            .insert("clock".to_string(), Value::Function(Function::Clock));
-
-        let name_resolution = NameResolution::new(&globals);
-
-        Self {
-            values: Environment::from_scope(globals),
-            name_resolution,
-        }
-    }
-
-    pub fn interpret(
-        &mut self,
-        program: &Program,
-    ) -> Result<(), Vec<InterpretError>> {
+    pub fn execute(&mut self, program: &Program) -> Result<(), InterpretError> {
         for stmt in &program.stmts {
-            stmt.accept(&mut self.name_resolution);
-        }
-
-        self.name_resolution.take_errors()?;
-
-        for stmt in &program.stmts {
-            stmt.accept(self).map_err(|e| vec![e])?;
+            self.step(stmt)?;
         }
 
         Ok(())
     }
 
-    pub fn repl(
-        &mut self,
-        repl: &Repl,
-    ) -> Result<Option<Value>, Vec<InterpretError>> {
-        match repl {
-            Repl::Expr(expr) => expr.accept(&mut self.name_resolution),
-            Repl::Stmt(stmt) => stmt.accept(&mut self.name_resolution),
-        }
-
-        self.name_resolution.take_errors()?;
-
-        match repl {
-            Repl::Expr(expr) => {
-                let value = expr.accept(self).map_err(|e| vec![e])?;
-                Ok(Some(value))
-            }
-            Repl::Stmt(stmt) => {
-                stmt.accept(self).map_err(|e| vec![e])?;
-                Ok(None)
-            }
-        }
+    pub fn step(&mut self, stmt: &Stmt) -> Result<(), InterpretError> {
+        stmt.accept(self)
     }
 
-    fn eval(&mut self, expr: &Expr) -> Result<Value, InterpretError> {
+    pub fn eval(&mut self, expr: &Expr) -> Result<Value, InterpretError> {
         expr.accept(self)
     }
-}
 
-impl Default for Interpreter {
-    fn default() -> Self {
-        Self::new()
+    #[allow(dead_code)]
+    fn eval_boolean(&mut self, expr: &Expr) -> Result<bool, InterpretError> {
+        match self.eval(expr)? {
+            Value::Bool(b) => Ok(b),
+            actual => Err(InterpretError::ExpectedBoolean {
+                span: expr.span(),
+                actual,
+            }),
+        }
+    }
+
+    fn eval_number(&mut self, expr: &Expr) -> Result<f64, InterpretError> {
+        match self.eval(expr)? {
+            Value::Number(n) => Ok(n),
+            actual => Err(InterpretError::ExpectedNumber {
+                span: expr.span(),
+                actual,
+            }),
+        }
+    }
+
+    fn eval_function(
+        &mut self,
+        expr: &Expr,
+    ) -> Result<Function, InterpretError> {
+        match self.eval(expr)? {
+            Value::Function(f) => Ok(f),
+            actual => Err(InterpretError::ExpectedFunction {
+                span: expr.span(),
+                actual,
+            }),
+        }
+    }
+
+    fn get(&self, name: &str, depth: usize) -> Option<Value> {
+        if depth == 0 {
+            self.globals.get(name).cloned()
+        } else {
+            self.locals[depth - 1].get(name).cloned()
+        }
+    }
+
+    fn set(&mut self, name: &str, depth: usize, value: Value) {
+        if depth == 0 {
+            *self.globals.get_mut(name).unwrap() = value;
+        } else {
+            *self.locals[depth - 1].get_mut(name).unwrap() = value;
+        }
+    }
+
+    fn define(&mut self, name: String, value: Value) {
+        if let Some(local) = self.locals.last_mut() {
+            local.insert(name, value);
+        } else {
+            self.globals.insert(name, value);
+        }
+    }
+
+    fn push(&mut self) {
+        self.locals.push(HashMap::new());
+    }
+
+    fn pop(&mut self) {
+        self.locals.pop();
     }
 }
 
-impl ExprVisitor for Interpreter {
+impl ExprVisitor for Interpreter<'_> {
     type Output = Result<Value, InterpretError>;
 
     fn visit_literal_expr(&mut self, literal: &LiteralExpr) -> Self::Output {
@@ -260,8 +226,8 @@ impl ExprVisitor for Interpreter {
     }
 
     fn visit_variable_expr(&mut self, expr: &VariableExpr) -> Self::Output {
-        let depth = self.name_resolution.get(expr.decoration).unwrap();
-        let value = self.values.get(&expr.ident.value, depth).unwrap();
+        let depth = self.compiler.name_resolution.get(expr.decoration).unwrap();
+        let value = self.get(&expr.ident.value, depth).unwrap();
         if matches!(value, Value::Uninitialized) {
             return Err(InterpretError::UninitializedVariable(
                 expr.ident.span(),
@@ -272,9 +238,9 @@ impl ExprVisitor for Interpreter {
     }
 
     fn visit_assign_expr(&mut self, expr: &AssignExpr) -> Self::Output {
-        let depth = self.name_resolution.get(expr.decoration).unwrap();
+        let depth = self.compiler.name_resolution.get(expr.decoration).unwrap();
         let value = self.eval(&expr.expr)?;
-        self.values.set(&expr.ident.value, depth, value.clone());
+        self.set(&expr.ident.value, depth, value.clone());
 
         Ok(value)
     }
@@ -284,6 +250,9 @@ impl ExprVisitor for Interpreter {
 
         let arity = match callee {
             Function::Clock => 0,
+            Function::Decl(id) => {
+                self.compiler.decls.get_fun(id).unwrap().params.len()
+            }
         };
         if arity != expr.arguments.len() {
             return Err(InterpretError::IncorrectFunctionArity {
@@ -306,11 +275,31 @@ impl ExprVisitor for Interpreter {
                     .unwrap()
                     .as_secs_f64(),
             )),
+            Function::Decl(id) => {
+                let function = self.compiler.decls.get_fun(id).unwrap();
+
+                let mut interpreter =
+                    Interpreter::new(self.compiler, self.globals);
+
+                interpreter.push();
+
+                for (name, argument) in
+                    function.params.iter().zip(arguments.into_iter())
+                {
+                    interpreter.define(name.value.clone(), argument);
+                }
+
+                for stmt in &function.body.stmts {
+                    stmt.accept(&mut interpreter)?;
+                }
+
+                Ok(Value::Nil)
+            }
         }
     }
 }
 
-impl StmtVisitor for Interpreter {
+impl StmtVisitor for Interpreter<'_> {
     type Output = Result<(), InterpretError>;
 
     fn visit_var_decl_stmt(&mut self, stmt: &VarDeclStmt) -> Self::Output {
@@ -319,12 +308,17 @@ impl StmtVisitor for Interpreter {
         } else {
             Value::Uninitialized
         };
-        self.values.define(stmt.ident.value.clone(), value);
+        self.define(stmt.ident.value.clone(), value);
         Ok(())
     }
 
-    fn visit_fun_decl_stmt(&mut self, _stmt: &FunDeclStmt) -> Self::Output {
-        todo!()
+    fn visit_fun_decl_stmt(&mut self, stmt: &FunDeclStmt) -> Self::Output {
+        // TODO: can't reference functions before they're defined
+        self.define(
+            stmt.name.value.clone(),
+            Value::Function(Function::Decl(stmt.decoration)),
+        );
+        Ok(())
     }
 
     fn visit_expr_stmt(&mut self, stmt: &ExprStmt) -> Self::Output {
@@ -339,18 +333,13 @@ impl StmtVisitor for Interpreter {
     }
 
     fn visit_block_stmt(&mut self, stmt: &BlockStmt) -> Self::Output {
-        let mut result = Ok(());
-        self.values.push();
-
+        self.push();
         for stmt in &stmt.stmts {
-            if let Err(e) = stmt.accept(self) {
-                result = Err(e);
-                break;
-            }
+            stmt.accept(self)?;
         }
+        self.pop();
 
-        self.values.pop();
-        result
+        Ok(())
     }
 
     fn visit_if_stmt(&mut self, stmt: &IfStmt) -> Self::Output {

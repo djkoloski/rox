@@ -1,5 +1,4 @@
-use core::mem::take;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     ast::{
@@ -13,64 +12,107 @@ use crate::{
             VarDeclStmt, VisitStmt as _,
         },
     },
-    interpreter::{eval::Value, Environment, InterpretError, Scope},
+    compiler::CompileError,
     span::Spanned as _,
 };
 
 pub struct NameResolution {
-    names: Environment<()>,
     resolutions: HashMap<Decoration, usize>,
-    errors: Vec<InterpretError>,
 }
 
 impl NameResolution {
-    pub fn new(global_scope: &Scope<Value>) -> Self {
-        let mut names = Environment::new();
-
-        for name in global_scope.names.keys() {
-            names.define(name.clone(), ());
-        }
-
+    pub fn new() -> Self {
         Self {
-            names,
             resolutions: HashMap::new(),
-            errors: Vec::new(),
-        }
-    }
-
-    pub fn take_errors(&mut self) -> Result<(), Vec<InterpretError>> {
-        if self.errors.is_empty() {
-            Ok(())
-        } else {
-            Err(take(&mut self.errors))
         }
     }
 
     pub fn get(&self, decoration: Decoration) -> Option<usize> {
         self.resolutions.get(&decoration).cloned()
     }
+
+    pub fn pass<'a>(
+        &'a mut self,
+        globals: &'a mut HashSet<String>,
+    ) -> NameResolutionPass<'a> {
+        NameResolutionPass {
+            resolution: self,
+            globals,
+            locals: Vec::new(),
+            errors: Vec::new(),
+        }
+    }
 }
 
-impl StmtVisitor for NameResolution {
+impl Default for NameResolution {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub struct NameResolutionPass<'a> {
+    resolution: &'a mut NameResolution,
+    globals: &'a mut HashSet<String>,
+    locals: Vec<HashSet<String>>,
+    errors: Vec<CompileError>,
+}
+
+impl NameResolutionPass<'_> {
+    pub fn finish(self) -> Result<(), Vec<CompileError>> {
+        if self.errors.is_empty() {
+            Ok(())
+        } else {
+            Err(self.errors)
+        }
+    }
+
+    fn define(&mut self, name: String) {
+        if let Some(local) = self.locals.last_mut() {
+            local.insert(name);
+        } else {
+            self.globals.insert(name);
+        }
+    }
+
+    fn resolve(&self, name: &str) -> Option<usize> {
+        for (i, scope) in self.locals.iter().enumerate().rev() {
+            if scope.contains(name) {
+                return Some(i + 1);
+            }
+        }
+        if self.globals.contains(name) {
+            return Some(0);
+        }
+        None
+    }
+}
+
+impl StmtVisitor for NameResolutionPass<'_> {
     type Output = ();
 
     fn visit_block_stmt(&mut self, stmt: &BlockStmt) -> Self::Output {
-        self.names.push();
+        self.locals.push(HashSet::new());
         for stmt in stmt.stmts.iter() {
             stmt.accept(self);
         }
-        self.names.pop();
+        self.locals.pop();
     }
 
     fn visit_var_decl_stmt(&mut self, stmt: &VarDeclStmt) -> Self::Output {
         if let Some((_, expr)) = &stmt.assignment {
             expr.accept(self);
         }
-        self.names.define(stmt.ident.value.clone(), ());
+        self.define(stmt.ident.value.clone());
     }
 
-    fn visit_fun_decl_stmt(&mut self, _stmt: &FunDeclStmt) -> Self::Output {
-        todo!()
+    fn visit_fun_decl_stmt(&mut self, stmt: &FunDeclStmt) -> Self::Output {
+        self.define(stmt.name.value.clone());
+        self.locals
+            .push(stmt.params.iter().map(|p| p.value.clone()).collect());
+        for stmt in stmt.body.stmts.iter() {
+            stmt.accept(self);
+        }
+        self.locals.pop();
     }
 
     fn visit_expr_stmt(&mut self, stmt: &ExprStmt) -> Self::Output {
@@ -90,7 +132,7 @@ impl StmtVisitor for NameResolution {
     }
 }
 
-impl ExprVisitor for NameResolution {
+impl ExprVisitor for NameResolutionPass<'_> {
     type Output = ();
 
     fn visit_literal_expr(&mut self, _: &LiteralExpr) -> Self::Output {}
@@ -109,14 +151,14 @@ impl ExprVisitor for NameResolution {
     }
 
     fn visit_variable_expr(&mut self, expr: &VariableExpr) -> Self::Output {
-        let Some(depth) = self.names.resolve(&expr.ident.value) else {
-            self.errors.push(InterpretError::UndefinedVariable {
+        let Some(depth) = self.resolve(&expr.ident.value) else {
+            self.errors.push(CompileError::UndefinedVariable {
                 span: expr.ident.span(),
             });
             return;
         };
 
-        self.resolutions.insert(expr.decoration, depth);
+        self.resolution.resolutions.insert(expr.decoration, depth);
     }
 
     fn visit_assign_expr(&mut self, expr: &AssignExpr) -> Self::Output {

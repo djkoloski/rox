@@ -1,4 +1,5 @@
 use std::{
+    collections::{HashMap, HashSet},
     env::args_os,
     fs,
     io::{self, Write as _},
@@ -7,15 +8,20 @@ use std::{
 };
 
 use rox::{
+    ast::stmt::Repl,
+    compiler::Compiler,
     diagnostic::{Context, Diagnostic},
-    interpreter::Interpreter,
+    interpreter::{
+        value::{Function, Value},
+        Interpreter,
+    },
     parser::Parser,
     scanner::Scanner,
 };
 
 enum Error {
-    Compiler,
-    Runtime,
+    Compile,
+    Interpret,
     Io(io::Error),
 }
 
@@ -28,8 +34,8 @@ impl Error {
 
     fn status(&self) -> i32 {
         match self {
-            Self::Compiler => 64,
-            Self::Runtime => 65,
+            Self::Compile => 64,
+            Self::Interpret => 65,
             Self::Io(_) => 66,
         }
     }
@@ -57,11 +63,20 @@ fn cli() -> Result<(), Error> {
         2 => run_file(Path::new(&args.nth(1).unwrap()))?,
         _ => {
             eprintln!("Usage: rox [script]");
-            return Err(Error::Compiler);
+            return Err(Error::Compile);
         }
     }
 
     Ok(())
+}
+
+fn make_globals() -> (HashSet<String>, HashMap<String, Value>) {
+    let mut global_values = HashMap::new();
+
+    global_values.insert("clock".to_string(), Value::Function(Function::Clock));
+
+    let global_names = global_values.keys().cloned().collect();
+    (global_names, global_values)
 }
 
 fn run_file(path: &Path) -> Result<(), Error> {
@@ -84,26 +99,37 @@ fn run_file(path: &Path) -> Result<(), Error> {
         }
     }
 
-    if !scanner.errors.is_empty()
-        || !parser.errors.is_empty()
-        || program.is_none()
-    {
-        return Err(Error::Compiler);
+    if !scanner.errors.is_empty() || !parser.errors.is_empty() {
+        return Err(Error::Compile);
     }
 
-    let mut interpreter = Interpreter::new();
-    if let Err(errors) = interpreter.interpret(&program.unwrap()) {
+    let program = program.unwrap();
+
+    let (mut global_names, mut global_values) = make_globals();
+
+    let mut compiler = Compiler::new();
+
+    if let Err(errors) = compiler.compile(&program, &mut global_names) {
         for error in errors {
             emit(&source, &error);
         }
-        return Err(Error::Runtime);
+        return Err(Error::Compile);
+    }
+
+    let mut interpreter = Interpreter::new(&compiler, &mut global_values);
+
+    if let Err(error) = interpreter.execute(&program) {
+        emit(&source, &error);
+        return Err(Error::Interpret);
     }
 
     Ok(())
 }
 
 fn run_prompt() -> Result<(), Error> {
-    let mut interpreter = Interpreter::new();
+    let (mut global_names, mut global_values) = make_globals();
+
+    let mut compiler = Compiler::new();
 
     loop {
         print!("> ");
@@ -125,6 +151,7 @@ fn run_prompt() -> Result<(), Error> {
             }
         }
 
+        // TODO: parser is creating a fresh decorator every time, which is wrong
         let mut parser = Parser::new(tokens);
         let repl = parser.parse_repl();
         if !parser.errors.is_empty() {
@@ -133,18 +160,27 @@ fn run_prompt() -> Result<(), Error> {
             }
         }
 
-        if !scanner.errors.is_empty()
-            || !parser.errors.is_empty()
-            || repl.is_none()
-        {
+        if !scanner.errors.is_empty() || !parser.errors.is_empty() {
             continue;
         }
 
-        match interpreter.repl(&repl.unwrap()) {
-            Ok(None) => (),
-            Ok(Some(value)) => println!("{value}"),
-            Err(errors) => {
-                for error in errors {
+        let repl = repl.unwrap();
+
+        if let Err(errors) = compiler.compile_repl(&repl, &mut global_names) {
+            for error in errors {
+                emit(&line, &error);
+            }
+            continue;
+        }
+
+        let mut interpreter = Interpreter::new(&compiler, &mut global_values);
+        match &repl {
+            Repl::Expr(expr) => match interpreter.eval(expr) {
+                Ok(value) => println!("{value}"),
+                Err(error) => emit(&line, &error),
+            },
+            Repl::Stmt(stmt) => {
+                if let Err(error) = interpreter.step(stmt) {
                     emit(&line, &error);
                 }
             }

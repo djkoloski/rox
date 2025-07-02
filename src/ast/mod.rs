@@ -56,6 +56,7 @@ macro_rules! ast_node {
         }
     };
     (@enum $name:ident { $($variant:ident($ty:ty),)* }) => {
+        #[derive(Clone, Debug)]
         pub enum $name {
             $($variant($ty),)*
         }
@@ -117,6 +118,7 @@ macro_rules! ast_node {
         }
         $($rest:tt)*
     ) => {
+        #[derive(Clone, Debug)]
         pub struct $name {
             $(pub $field: $ty $(<$($args),*>)?,)*
         }

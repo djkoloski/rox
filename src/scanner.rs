@@ -339,7 +339,7 @@ macro_rules! token {
         }
     ) => {
         $(
-            #[derive(Debug)]
+            #[derive(Clone, Debug)]
             pub struct $variant {
                 pub span: Span,
                 $(pub value: $value,)*
@@ -369,7 +369,7 @@ macro_rules! token {
             }
         )*
 
-        #[derive(Debug)]
+        #[derive(Clone, Debug)]
         pub enum $name {
             $($variant($variant),)*
         }

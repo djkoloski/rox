@@ -1,5 +1,6 @@
 use crate::span::Spanned;
 
+#[derive(Debug)]
 pub struct Punctuated<T, P> {
     values: Vec<(T, P)>,
     last: Option<Box<T>>,
@@ -73,5 +74,14 @@ impl<T, P> Punctuated<T, P> {
 impl<T, P> Default for Punctuated<T, P> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl<T: Clone, P: Clone> Clone for Punctuated<T, P> {
+    fn clone(&self) -> Self {
+        Self {
+            values: self.values.clone(),
+            last: self.last.clone(),
+        }
     }
 }

@@ -2,7 +2,7 @@ use core::fmt;
 
 use crate::{
     diagnostic::{Context, Diagnostic},
-    interpreter::eval::{Function, Value},
+    interpreter::value::{Function, Value},
     span::Span,
 };
 

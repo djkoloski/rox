@@ -1,5 +1,6 @@
 use crate::{
     ast::{
+        decoration::Decoration,
         expr::{Expr, GroupingExpr},
         punctuated::Punctuated,
     },
@@ -52,6 +53,7 @@ ast_node! {
 
     #[visit(VisitStmt, StmtVisitor::visit_fun_decl_stmt)]
     pub struct FunDeclStmt {
+        pub decoration: Decoration,
         pub fun: Fun,
         pub name: Identifier,
         pub lparen: LeftParen,

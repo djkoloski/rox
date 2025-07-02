@@ -280,6 +280,7 @@ impl Parser {
         let body = self.block_stmt()?;
 
         Some(Stmt::FunDecl(FunDeclStmt {
+            decoration: self.decorator.decorate(),
             fun,
             name,
             lparen,
