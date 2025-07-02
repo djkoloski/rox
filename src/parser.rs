@@ -379,7 +379,7 @@ impl<'a> Parser<'a> {
     }
 
     fn assignment(&mut self) -> Option<Expr> {
-        let expr = self.equality()?;
+        let expr = self.logic_or()?;
 
         if let Some(equal) = self.try_next() {
             let value = self.assignment()?;
@@ -399,6 +399,32 @@ impl<'a> Parser<'a> {
         } else {
             Some(expr)
         }
+    }
+
+    fn logic_or(&mut self) -> Option<Expr> {
+        let mut expr = self.logic_and()?;
+        while let Some(or) = self.try_next() {
+            let rhs = self.logic_and()?;
+            expr = Expr::Binary(BinaryExpr {
+                left: Box::new(expr),
+                operator: BinaryOperator::Or(or),
+                right: Box::new(rhs),
+            });
+        }
+        Some(expr)
+    }
+
+    fn logic_and(&mut self) -> Option<Expr> {
+        let mut expr = self.equality()?;
+        while let Some(and) = self.try_next() {
+            let rhs = self.equality()?;
+            expr = Expr::Binary(BinaryExpr {
+                left: Box::new(expr),
+                operator: BinaryOperator::And(and),
+                right: Box::new(rhs),
+            });
+        }
+        Some(expr)
     }
 
     fn equality(&mut self) -> Option<Expr> {

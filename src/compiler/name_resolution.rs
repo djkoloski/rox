@@ -8,8 +8,8 @@ use crate::{
             UnaryExpr, VariableExpr, VisitExpr as _,
         },
         stmt::{
-            BlockStmt, ExprStmt, FunDeclStmt, IfStmt, PrintStmt, StmtVisitor,
-            VarDeclStmt, VisitStmt as _,
+            BlockStmt, ExprStmt, FunDeclStmt, IfStmt, PrintStmt, ReturnStmt,
+            StmtVisitor, VarDeclStmt, VisitStmt as _,
         },
     },
     compiler::CompileError,
@@ -129,6 +129,10 @@ impl StmtVisitor for NameResolutionPass<'_> {
         if let Some((_, group)) = &stmt.else_ {
             group.accept(self);
         }
+    }
+
+    fn visit_return_stmt(&mut self, stmt: &ReturnStmt) -> Self::Output {
+        stmt.expr.accept(self);
     }
 }
 

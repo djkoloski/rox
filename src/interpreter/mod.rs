@@ -11,8 +11,8 @@ use crate::{
             UnaryOperator, VariableExpr, VisitExpr as _,
         },
         stmt::{
-            BlockStmt, ExprStmt, FunDeclStmt, IfStmt, PrintStmt, Program, Stmt,
-            StmtVisitor, VarDeclStmt, VisitStmt as _,
+            BlockStmt, ExprStmt, FunDeclStmt, IfStmt, PrintStmt, Program,
+            ReturnStmt, Stmt, StmtVisitor, VarDeclStmt, VisitStmt as _,
         },
     },
     compiler::Compiler,
@@ -55,17 +55,6 @@ impl<'a> Interpreter<'a> {
 
     pub fn eval(&mut self, expr: &Expr) -> Result<Value, InterpretError> {
         expr.accept(self)
-    }
-
-    #[allow(dead_code)]
-    fn eval_boolean(&mut self, expr: &Expr) -> Result<bool, InterpretError> {
-        match self.eval(expr)? {
-            Value::Bool(b) => Ok(b),
-            actual => Err(InterpretError::ExpectedBoolean {
-                span: expr.span(),
-                actual,
-            }),
-        }
     }
 
     fn eval_number(&mut self, expr: &Expr) -> Result<f64, InterpretError> {
@@ -150,6 +139,22 @@ impl ExprVisitor for Interpreter<'_> {
 
     fn visit_binary_expr(&mut self, binary: &BinaryExpr) -> Self::Output {
         Ok(match binary.operator {
+            BinaryOperator::And(_) => {
+                let lhs = self.eval(&binary.left)?;
+                if !lhs.truthiness() {
+                    lhs
+                } else {
+                    self.eval(&binary.right)?
+                }
+            }
+            BinaryOperator::Or(_) => {
+                let lhs = self.eval(&binary.left)?;
+                if lhs.truthiness() {
+                    lhs
+                } else {
+                    self.eval(&binary.right)?
+                }
+            }
             BinaryOperator::Minus(_) => Value::Number(
                 self.eval_number(&binary.left)?
                     - self.eval_number(&binary.right)?,
@@ -343,13 +348,17 @@ impl StmtVisitor for Interpreter<'_> {
     }
 
     fn visit_if_stmt(&mut self, stmt: &IfStmt) -> Self::Output {
-        let cond = self.eval_boolean(&stmt.group.inner)?;
-        if cond {
+        let value = self.eval(&stmt.group.inner)?;
+        if value.truthiness() {
             stmt.then.accept(self)?;
         } else if let Some((_, else_)) = &stmt.else_ {
             else_.accept(self)?;
         }
 
         Ok(())
+    }
+
+    fn visit_return_stmt(&mut self, _stmt: &ReturnStmt) -> Self::Output {
+        todo!()
     }
 }

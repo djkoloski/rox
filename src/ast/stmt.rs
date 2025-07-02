@@ -16,6 +16,7 @@ pub trait StmtVisitor {
     fn visit_print_stmt(&mut self, stmt: &PrintStmt) -> Self::Output;
     fn visit_block_stmt(&mut self, stmt: &BlockStmt) -> Self::Output;
     fn visit_if_stmt(&mut self, stmt: &IfStmt) -> Self::Output;
+    fn visit_return_stmt(&mut self, stmt: &ReturnStmt) -> Self::Output;
 }
 
 pub trait VisitStmt<V: StmtVisitor> {
@@ -41,6 +42,7 @@ ast_node! {
         Print(PrintStmt),
         Block(BlockStmt),
         If(IfStmt),
+        Return(ReturnStmt),
     }
 
     #[visit(VisitStmt, StmtVisitor::visit_var_decl_stmt)]
@@ -88,5 +90,12 @@ ast_node! {
         pub group: GroupingExpr,
         pub then: Box<Stmt>,
         pub else_: Option<(Else, Box<Stmt>)>,
+    }
+
+    #[visit(VisitStmt, StmtVisitor::visit_return_stmt)]
+    pub struct ReturnStmt {
+        pub return_: Return,
+        pub expr: Expr,
+        pub semi: Semicolon,
     }
 }

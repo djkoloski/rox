@@ -1,9 +1,9 @@
 use crate::{
     ast::{decoration::Decoration, punctuated::Punctuated},
     scanner::{
-        Bang, BangEqual, Comma, Equal, EqualEqual, False, Greater,
+        And, Bang, BangEqual, Comma, Equal, EqualEqual, False, Greater,
         GreaterEqual, Identifier, LeftParen, Less, LessEqual, Minus, Nil,
-        Number, Plus, RightParen, Slash, Star, String, True,
+        Number, Or, Plus, RightParen, Slash, Star, String, True,
     },
 };
 
@@ -70,6 +70,8 @@ ast_node! {
 
     #[token]
     pub enum BinaryOperator {
+        And(And),
+        Or(Or),
         Greater(Greater),
         GreaterEqual(GreaterEqual),
         Less(Less),
