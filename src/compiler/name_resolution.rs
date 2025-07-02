@@ -137,7 +137,9 @@ impl StmtVisitor for NameResolutionPass<'_> {
     }
 
     fn visit_return_stmt(&mut self, stmt: &ReturnStmt) -> Self::Output {
-        stmt.expr.accept(self);
+        if let Some(expr) = &stmt.expr {
+            expr.accept(self);
+        }
     }
 }
 

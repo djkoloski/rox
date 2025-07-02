@@ -1,3 +1,4 @@
+use core::ops::ControlFlow;
 use std::{
     collections::{HashMap, HashSet},
     env::args_os,
@@ -181,11 +182,11 @@ fn run_prompt() -> Result<(), Error> {
                 Ok(value) => println!("{value}"),
                 Err(error) => emit(&line, &error),
             },
-            Repl::Stmt(stmt) => {
-                if let Err(error) = interpreter.step(stmt) {
-                    emit(&line, &error);
-                }
-            }
+            Repl::Stmt(stmt) => match interpreter.step(stmt) {
+                ControlFlow::Continue(()) => (),
+                ControlFlow::Break(Ok(value)) => println!("returned {value}"),
+                ControlFlow::Break(Err(error)) => emit(&line, &error),
+            },
         }
 
         println!();

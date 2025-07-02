@@ -106,7 +106,7 @@ ast_node! {
     #[visit(VisitStmt, StmtVisitor::visit_return_stmt)]
     pub struct ReturnStmt {
         pub return_: Return,
-        pub expr: Expr,
+        pub expr: Option<Expr>,
         pub semi: Semicolon,
     }
 }

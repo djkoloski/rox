@@ -1,6 +1,7 @@
 mod error;
 pub mod value;
 
+use core::ops::ControlFlow;
 use std::{collections::HashMap, time::SystemTime};
 
 use crate::{
@@ -42,20 +43,38 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    pub fn execute(&mut self, program: &Program) -> Result<(), InterpretError> {
+    pub fn execute(
+        &mut self,
+        program: &Program,
+    ) -> Result<Value, InterpretError> {
         for stmt in &program.stmts {
-            self.step(stmt)?;
+            if let Some(result) = self.step(stmt).break_value() {
+                return result;
+            }
         }
 
-        Ok(())
+        Ok(Value::Nil)
     }
 
-    pub fn step(&mut self, stmt: &Stmt) -> Result<(), InterpretError> {
+    pub fn step(
+        &mut self,
+        stmt: &Stmt,
+    ) -> ControlFlow<Result<Value, InterpretError>> {
         stmt.accept(self)
     }
 
     pub fn eval(&mut self, expr: &Expr) -> Result<Value, InterpretError> {
         expr.accept(self)
+    }
+
+    fn eval_or_break(
+        &mut self,
+        expr: &Expr,
+    ) -> ControlFlow<Result<Value, InterpretError>, Value> {
+        match expr.accept(self) {
+            Ok(value) => ControlFlow::Continue(value),
+            Err(error) => ControlFlow::Break(Err(error)),
+        }
     }
 
     fn eval_number(&mut self, expr: &Expr) -> Result<f64, InterpretError> {
@@ -296,7 +315,11 @@ impl ExprVisitor for Interpreter<'_> {
                 }
 
                 for stmt in &function.body.stmts {
-                    stmt.accept(&mut interpreter)?;
+                    if let Some(break_value) =
+                        stmt.accept(&mut interpreter).break_value()
+                    {
+                        return break_value;
+                    }
                 }
 
                 Ok(Value::Nil)
@@ -306,16 +329,17 @@ impl ExprVisitor for Interpreter<'_> {
 }
 
 impl StmtVisitor for Interpreter<'_> {
-    type Output = Result<(), InterpretError>;
+    type Output = ControlFlow<Result<Value, InterpretError>>;
 
     fn visit_var_decl_stmt(&mut self, stmt: &VarDeclStmt) -> Self::Output {
         let value = if let Some(assignment) = &stmt.assignment {
-            self.eval(&assignment.1)?
+            self.eval_or_break(&assignment.1)?
         } else {
             Value::Uninitialized
         };
         self.define(stmt.ident.value.clone(), value);
-        Ok(())
+
+        ControlFlow::Continue(())
     }
 
     fn visit_fun_decl_stmt(&mut self, stmt: &FunDeclStmt) -> Self::Output {
@@ -324,18 +348,21 @@ impl StmtVisitor for Interpreter<'_> {
             stmt.name.value.clone(),
             Value::Function(Function::Decl(stmt.decoration)),
         );
-        Ok(())
+
+        ControlFlow::Continue(())
     }
 
     fn visit_expr_stmt(&mut self, stmt: &ExprStmt) -> Self::Output {
-        self.eval(&stmt.expr)?;
-        Ok(())
+        self.eval_or_break(&stmt.expr)?;
+
+        ControlFlow::Continue(())
     }
 
     fn visit_print_stmt(&mut self, stmt: &PrintStmt) -> Self::Output {
-        let value = self.eval(&stmt.expr)?;
+        let value = self.eval_or_break(&stmt.expr)?;
         println!("{value}");
-        Ok(())
+
+        ControlFlow::Continue(())
     }
 
     fn visit_block_stmt(&mut self, stmt: &BlockStmt) -> Self::Output {
@@ -345,29 +372,33 @@ impl StmtVisitor for Interpreter<'_> {
         }
         self.pop();
 
-        Ok(())
+        ControlFlow::Continue(())
     }
 
     fn visit_if_stmt(&mut self, stmt: &IfStmt) -> Self::Output {
-        let value = self.eval(&stmt.group.inner)?;
+        let value = self.eval_or_break(&stmt.group.inner)?;
         if value.truthiness() {
             stmt.then.accept(self)?;
         } else if let Some((_, else_)) = &stmt.else_ {
             else_.accept(self)?;
         }
 
-        Ok(())
+        ControlFlow::Continue(())
     }
 
     fn visit_while_stmt(&mut self, stmt: &WhileStmt) -> Self::Output {
-        while self.eval(&stmt.expr)?.truthiness() {
+        while self.eval_or_break(&stmt.expr)?.truthiness() {
             stmt.body.accept(self)?;
         }
 
-        Ok(())
+        ControlFlow::Continue(())
     }
 
-    fn visit_return_stmt(&mut self, _stmt: &ReturnStmt) -> Self::Output {
-        todo!()
+    fn visit_return_stmt(&mut self, stmt: &ReturnStmt) -> Self::Output {
+        let mut result = Ok(Value::Nil);
+        if let Some(expr) = &stmt.expr {
+            result = Ok(self.eval_or_break(expr)?);
+        }
+        ControlFlow::Break(result)
     }
 }

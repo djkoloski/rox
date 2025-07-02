@@ -10,7 +10,7 @@ use crate::{
         punctuated::Punctuated,
         stmt::{
             BlockStmt, ExprStmt, FunDeclStmt, IfStmt, PrintStmt, Program, Repl,
-            Stmt, VarDeclStmt, WhileStmt,
+            ReturnStmt, Stmt, VarDeclStmt, WhileStmt,
         },
     },
     diagnostic::{Context, Diagnostic},
@@ -183,7 +183,10 @@ impl<'a> Parser<'a> {
             | Token::Fun(_)
             | Token::Print(_)
             | Token::LeftBrace(_)
-            | Token::If(_) => Some(Repl::Stmt(self.declaration()?)),
+            | Token::If(_)
+            | Token::While(_)
+            | Token::For(_)
+            | Token::Return(_) => Some(Repl::Stmt(self.declaration()?)),
             _ => Some(Repl::Expr(self.expression()?)),
         }
     }
@@ -294,6 +297,7 @@ impl<'a> Parser<'a> {
             Token::Print(_) => self.print_stmt()?.into(),
             Token::While(_) => self.while_stmt()?.into(),
             Token::For(_) => self.for_stmt()?,
+            Token::Return(_) => self.return_stmt()?.into(),
             Token::LeftBrace(_) => self.block_stmt()?.into(),
             _ => self.expr_stmt()?.into(),
         })
@@ -435,6 +439,24 @@ impl<'a> Parser<'a> {
             stmts,
             rbrace: RightBrace { span: for_.span() },
         }))
+    }
+
+    fn return_stmt(&mut self) -> Option<ReturnStmt> {
+        let return_ = self.try_next()?;
+        let mut expr = None;
+        if !matches!(self.peek(), Token::Semicolon(_)) {
+            expr = Some(self.expression()?);
+        }
+        let Some(semi) = self.try_next() else {
+            self.errors
+                .push(ParseError::ExpectedSemicolon(self.peek().span()));
+            return None;
+        };
+        Some(ReturnStmt {
+            return_,
+            expr,
+            semi,
+        })
     }
 
     fn block_stmt(&mut self) -> Option<BlockStmt> {
