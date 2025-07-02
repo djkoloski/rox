@@ -9,7 +9,7 @@
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceFolder}/target/debug/rox.exe",
-            "args": [".\\examples\\print_fun.rox"],
+            "args": [".\\examples\\while.rox"],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],

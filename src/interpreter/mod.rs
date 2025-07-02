@@ -13,6 +13,7 @@ use crate::{
         stmt::{
             BlockStmt, ExprStmt, FunDeclStmt, IfStmt, PrintStmt, Program,
             ReturnStmt, Stmt, StmtVisitor, VarDeclStmt, VisitStmt as _,
+            WhileStmt,
         },
     },
     compiler::Compiler,
@@ -353,6 +354,14 @@ impl StmtVisitor for Interpreter<'_> {
             stmt.then.accept(self)?;
         } else if let Some((_, else_)) = &stmt.else_ {
             else_.accept(self)?;
+        }
+
+        Ok(())
+    }
+
+    fn visit_while_stmt(&mut self, stmt: &WhileStmt) -> Self::Output {
+        while self.eval(&stmt.expr)?.truthiness() {
+            stmt.body.accept(self)?;
         }
 
         Ok(())

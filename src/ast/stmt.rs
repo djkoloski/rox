@@ -16,6 +16,7 @@ pub trait StmtVisitor {
     fn visit_print_stmt(&mut self, stmt: &PrintStmt) -> Self::Output;
     fn visit_block_stmt(&mut self, stmt: &BlockStmt) -> Self::Output;
     fn visit_if_stmt(&mut self, stmt: &IfStmt) -> Self::Output;
+    fn visit_while_stmt(&mut self, stmt: &WhileStmt) -> Self::Output;
     fn visit_return_stmt(&mut self, stmt: &ReturnStmt) -> Self::Output;
 }
 
@@ -42,6 +43,7 @@ ast_node! {
         Print(PrintStmt),
         Block(BlockStmt),
         If(IfStmt),
+        While(WhileStmt),
         Return(ReturnStmt),
     }
 
@@ -90,6 +92,15 @@ ast_node! {
         pub group: GroupingExpr,
         pub then: Box<Stmt>,
         pub else_: Option<(Else, Box<Stmt>)>,
+    }
+
+    #[visit(VisitStmt, StmtVisitor::visit_while_stmt)]
+    pub struct WhileStmt {
+        pub while_: While,
+        pub lparen: LeftParen,
+        pub expr: Expr,
+        pub rparen: RightParen,
+        pub body: Box<Stmt>,
     }
 
     #[visit(VisitStmt, StmtVisitor::visit_return_stmt)]

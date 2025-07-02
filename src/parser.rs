@@ -10,7 +10,7 @@ use crate::{
         punctuated::Punctuated,
         stmt::{
             BlockStmt, ExprStmt, FunDeclStmt, IfStmt, PrintStmt, Program, Repl,
-            Stmt, VarDeclStmt,
+            Stmt, VarDeclStmt, WhileStmt,
         },
     },
     diagnostic::{Context, Diagnostic},
@@ -88,21 +88,11 @@ impl Diagnostic for ParseError {
                 )?;
             }
             Self::ExpectedLeftParen(span) => {
-                c.error(f, format_args!("expected grouped expression"))?;
-                c.span(
-                    *span,
-                    f,
-                    format_args!("expected a left parenthesis here"),
-                )?;
+                c.error(f, format_args!("missing opening parenthesis"))?;
+                c.span(*span, f, format_args!("expected a '(' here"))?;
             }
             Self::ExpectedRightParen(span) => {
-                c.error(
-                    f,
-                    format_args!(
-                        "expected right parenthesis after function call \
-                         arguments"
-                    ),
-                )?;
+                c.error(f, format_args!("missing closing parenthesis"))?;
                 c.span(*span, f, format_args!("expected a ')' here"))?;
             }
             Self::InvalidAssignmentTarget(span) => {
@@ -263,8 +253,8 @@ impl<'a> Parser<'a> {
                 return None;
             };
             params.push(ident);
-            if matches!(self.peek(), Token::Comma(_)) {
-                params.push_punct(self.expect());
+            if let Some(comma) = self.try_next() {
+                params.push_punct(comma);
             } else {
                 break;
             }
@@ -294,6 +284,7 @@ impl<'a> Parser<'a> {
         Some(match self.peek() {
             Token::If(_) => self.if_stmt()?.into(),
             Token::Print(_) => self.print_stmt()?.into(),
+            Token::While(_) => self.while_stmt()?.into(),
             Token::LeftBrace(_) => self.block_stmt()?.into(),
             _ => self.expr_stmt()?.into(),
         })
@@ -330,6 +321,30 @@ impl<'a> Parser<'a> {
         };
 
         Some(PrintStmt { print, expr, semi })
+    }
+
+    fn while_stmt(&mut self) -> Option<WhileStmt> {
+        let while_ = self.try_next()?;
+        let Some(lparen) = self.try_next() else {
+            self.errors
+                .push(ParseError::ExpectedLeftParen(self.peek().span()));
+            return None;
+        };
+        let expr = self.expression()?;
+        let Some(rparen) = self.try_next() else {
+            self.errors
+                .push(ParseError::ExpectedRightParen(self.peek().span()));
+            return None;
+        };
+        let body = self.statement()?;
+
+        Some(WhileStmt {
+            while_,
+            lparen,
+            expr,
+            rparen,
+            body: Box::new(body),
+        })
     }
 
     fn block_stmt(&mut self) -> Option<BlockStmt> {
@@ -489,8 +504,8 @@ impl<'a> Parser<'a> {
             let mut arguments = Punctuated::new();
             while !matches!(self.peek(), Token::RightParen(_)) {
                 arguments.push(self.expression()?);
-                if matches!(self.peek(), Token::Comma(_)) {
-                    arguments.push_punct(self.expect());
+                if let Some(comma) = self.try_next() {
+                    arguments.push_punct(comma);
                 } else {
                     break;
                 }

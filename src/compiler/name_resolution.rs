@@ -9,7 +9,7 @@ use crate::{
         },
         stmt::{
             BlockStmt, ExprStmt, FunDeclStmt, IfStmt, PrintStmt, ReturnStmt,
-            StmtVisitor, VarDeclStmt, VisitStmt as _,
+            StmtVisitor, VarDeclStmt, VisitStmt as _, WhileStmt,
         },
     },
     compiler::CompileError,
@@ -131,6 +131,11 @@ impl StmtVisitor for NameResolutionPass<'_> {
         }
     }
 
+    fn visit_while_stmt(&mut self, stmt: &WhileStmt) -> Self::Output {
+        stmt.expr.accept(self);
+        stmt.body.accept(self);
+    }
+
     fn visit_return_stmt(&mut self, stmt: &ReturnStmt) -> Self::Output {
         stmt.expr.accept(self);
     }
@@ -166,6 +171,15 @@ impl ExprVisitor for NameResolutionPass<'_> {
     }
 
     fn visit_assign_expr(&mut self, expr: &AssignExpr) -> Self::Output {
+        let Some(depth) = self.resolve(&expr.ident.value) else {
+            self.errors.push(CompileError::UndefinedVariable {
+                span: expr.ident.span(),
+            });
+            return;
+        };
+
+        self.resolution.resolutions.insert(expr.decoration, depth);
+
         expr.expr.accept(self);
     }
 
