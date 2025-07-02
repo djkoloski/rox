@@ -8,7 +8,7 @@ use std::{
 };
 
 use rox::{
-    ast::stmt::Repl,
+    ast::{decoration::Decorator, stmt::Repl},
     compiler::Compiler,
     diagnostic::{Context, Diagnostic},
     interpreter::{
@@ -91,7 +91,8 @@ fn run_file(path: &Path) -> Result<(), Error> {
         }
     }
 
-    let mut parser = Parser::new(tokens);
+    let mut decorator = Decorator::new();
+    let mut parser = Parser::new(&mut decorator, tokens);
     let program = parser.parse();
     if !parser.errors.is_empty() {
         for error in &parser.errors {
@@ -127,6 +128,7 @@ fn run_file(path: &Path) -> Result<(), Error> {
 }
 
 fn run_prompt() -> Result<(), Error> {
+    let mut decorator = Decorator::new();
     let (mut global_names, mut global_values) = make_globals();
 
     let mut compiler = Compiler::new();
@@ -152,7 +154,7 @@ fn run_prompt() -> Result<(), Error> {
         }
 
         // TODO: parser is creating a fresh decorator every time, which is wrong
-        let mut parser = Parser::new(tokens);
+        let mut parser = Parser::new(&mut decorator, tokens);
         let repl = parser.parse_repl();
         if !parser.errors.is_empty() {
             for error in &parser.errors {

@@ -121,18 +121,18 @@ impl Diagnostic for ParseError {
     }
 }
 
-pub struct Parser {
+pub struct Parser<'a> {
     tokens: Vec<Token>,
-    decorator: Decorator,
+    decorator: &'a mut Decorator,
     pub errors: Vec<ParseError>,
 }
 
-impl Parser {
-    pub fn new(mut tokens: Vec<Token>) -> Self {
+impl<'a> Parser<'a> {
+    pub fn new(decorator: &'a mut Decorator, mut tokens: Vec<Token>) -> Self {
         tokens.reverse();
         Self {
             tokens,
-            decorator: Decorator::new(),
+            decorator,
             errors: Vec::new(),
         }
     }
