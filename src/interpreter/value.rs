@@ -15,7 +15,7 @@ pub enum Value {
     Bool(bool),
     Number(f64),
     String(String),
-    Function(Function),
+    Callable(Callable),
     Instance(Instance),
 }
 
@@ -33,7 +33,7 @@ impl fmt::Display for Value {
             }
             Self::Number(n) => write!(f, "{n}"),
             Self::String(s) => write!(f, "{s}"),
-            Self::Function(n) => write!(f, "{n}"),
+            Self::Callable(n) => write!(f, "{n}"),
             Self::Instance(i) => write!(f, "{i}"),
         }
     }
@@ -46,36 +46,35 @@ impl Value {
             Self::Bool(b) => *b,
             Self::Number(_)
             | Self::String(_)
-            | Self::Function(_)
+            | Self::Callable(_)
             | Self::Instance(_) => true,
         }
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct Function {
-    pub kind: FunctionKind,
+pub struct Callable {
+    pub kind: CallableKind,
     pub environment: Arc<Environment>,
 }
 
-impl PartialEq for Function {
+impl PartialEq for Callable {
     fn eq(&self, other: &Self) -> bool {
         self.kind == other.kind
     }
 }
 
-// TODO: need interpreter context for proper function display
-impl fmt::Display for Function {
+impl fmt::Display for Callable {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.kind {
-            FunctionKind::Clock => write!(f, "<builtin clock()>")?,
-            FunctionKind::Function(decoration) => {
+            CallableKind::Clock => write!(f, "<builtin clock()>")?,
+            CallableKind::Function(decoration) => {
                 write!(f, "<fun {decoration:?}>")?
             }
-            FunctionKind::Class(decoration) => {
+            CallableKind::Class(decoration) => {
                 write!(f, "<class {decoration:?}>")?
             }
-            FunctionKind::Method(decoration) => {
+            CallableKind::Method { decoration, .. } => {
                 write!(f, "<method {decoration:?}>")?
             }
         }
@@ -85,11 +84,14 @@ impl fmt::Display for Function {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum FunctionKind {
+pub enum CallableKind {
     Clock,
     Function(Decoration),
     Class(Decoration),
-    Method(Decoration),
+    Method {
+        decoration: Decoration,
+        is_initializer: bool,
+    },
 }
 
 #[derive(Debug, Clone)]

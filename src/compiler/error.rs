@@ -7,9 +7,20 @@ use crate::{
 
 #[derive(Debug)]
 pub enum CompileError {
-    UndefinedVariable { span: Span },
-    TopLevelReturn { span: Span },
-    ThisOutsideClass { span: Span },
+    UndefinedVariable {
+        span: Span,
+    },
+    TopLevelReturn {
+        span: Span,
+    },
+    ThisOutsideClass {
+        span: Span,
+    },
+    ReturnInInitializer {
+        method: Span,
+        span: Span,
+        class: Span,
+    },
 }
 
 impl Diagnostic for CompileError {
@@ -55,6 +66,36 @@ impl Diagnostic for CompileError {
                         "`this` always refers to the instance of the \
                          enclosing class"
                     ),
+                )?;
+            }
+            Self::ReturnInInitializer {
+                method,
+                span,
+                class,
+            } => {
+                c.error(
+                    f,
+                    format_args!("return statement in class initializer"),
+                )?;
+                c.span(
+                    *span,
+                    f,
+                    format_args!(
+                        "this `return` is inside of a class initializer"
+                    ),
+                )?;
+                c.span(
+                    *method,
+                    f,
+                    format_args!(
+                        "`{}` is a class initializer ...",
+                        method.get(c.source())
+                    ),
+                )?;
+                c.span(
+                    *class,
+                    f,
+                    format_args!("... for `{}`", class.get(c.source())),
                 )?;
             }
         }

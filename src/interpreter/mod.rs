@@ -7,14 +7,15 @@ use std::{sync::Arc, time::SystemTime};
 
 use crate::{
     ast::{
+        decoration::Decoration,
         expr::{
             AssignExpr, BinaryExpr, BinaryOperator, CallExpr, Expr,
             ExprVisitor, GetExpr, GroupingExpr, Literal, LiteralExpr, SetExpr,
             ThisExpr, UnaryExpr, UnaryOperator, VariableExpr, VisitExpr as _,
         },
         stmt::{
-            BlockStmt, ClassDeclStmt, ExprStmt, FunDeclStmt, IfStmt, PrintStmt,
-            Program, Repl, ReturnStmt, StmtVisitor, VarDeclStmt,
+            BlockStmt, ClassDeclStmt, ExprStmt, FunDeclStmt, Function, IfStmt,
+            PrintStmt, Program, Repl, ReturnStmt, StmtVisitor, VarDeclStmt,
             VisitStmt as _, WhileStmt,
         },
     },
@@ -22,7 +23,7 @@ use crate::{
     interpreter::{
         environment::Environment,
         error::InterpretError,
-        value::{Function, FunctionKind, Instance, Value},
+        value::{Callable, CallableKind, Instance, Value},
     },
     span::Spanned as _,
 };
@@ -93,13 +94,13 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn eval_function(
+    fn eval_callable(
         &mut self,
         expr: &Expr,
-    ) -> Result<Function, InterpretError> {
+    ) -> Result<Callable, InterpretError> {
         match self.eval(expr)? {
-            Value::Function(f) => Ok(f),
-            actual => Err(InterpretError::ExpectedFunction {
+            Value::Callable(f) => Ok(f),
+            actual => Err(InterpretError::ExpectedCallable {
                 span: expr.span(),
                 actual,
             }),
@@ -112,6 +113,43 @@ impl<'a> Interpreter<'a> {
 
     fn pop(&mut self) {
         self.environment = self.environment.parent().unwrap().clone();
+    }
+
+    fn find_initializer(&mut self, class: Decoration) -> Option<&'a Function> {
+        self.compiler
+            .decls
+            .get_class(class)
+            .unwrap()
+            .methods
+            .iter()
+            .find(|m| m.name.value == "init")
+    }
+
+    fn call_function(
+        &mut self,
+        function: &Function,
+        environment: Arc<Environment>,
+        arguments: Vec<Value>,
+    ) -> Result<Value, InterpretError> {
+        let mut interpreter = Interpreter::new(self.compiler, environment);
+
+        interpreter.push();
+
+        for (name, argument) in
+            function.params.iter().zip(arguments.into_iter())
+        {
+            interpreter.environment.define(name.value.clone(), argument);
+        }
+
+        for stmt in &function.body.stmts {
+            if let Some(break_value) =
+                stmt.accept(&mut interpreter).break_value()
+            {
+                return break_value;
+            }
+        }
+
+        Ok(Value::Nil)
     }
 }
 
@@ -254,14 +292,22 @@ impl ExprVisitor for Interpreter<'_> {
     }
 
     fn visit_call_expr(&mut self, expr: &CallExpr) -> Self::Output {
-        let callee = self.eval_function(&expr.function)?;
+        let callee = self.eval_callable(&expr.function)?;
 
         let arity = match callee.kind {
-            FunctionKind::Clock => 0,
-            FunctionKind::Function(id) | FunctionKind::Method(id) => {
-                self.compiler.decls.get_fun(id).unwrap().params.len()
-            }
-            FunctionKind::Class(_) => 0,
+            CallableKind::Clock => 0,
+            CallableKind::Function(decoration)
+            | CallableKind::Method { decoration, .. } => self
+                .compiler
+                .decls
+                .get_fun(decoration)
+                .unwrap()
+                .params
+                .len(),
+            CallableKind::Class(decoration) => self
+                .find_initializer(decoration)
+                .map(|f| f.params.len())
+                .unwrap_or(0),
         };
         if arity != expr.arguments.len() {
             return Err(InterpretError::IncorrectFunctionArity {
@@ -278,42 +324,49 @@ impl ExprVisitor for Interpreter<'_> {
         }
 
         match callee.kind {
-            FunctionKind::Clock => Ok(Value::Number(
+            CallableKind::Clock => Ok(Value::Number(
                 SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
                     .unwrap()
                     .as_secs_f64(),
             )),
-            FunctionKind::Function(id) | FunctionKind::Method(id) => {
-                let function = self.compiler.decls.get_fun(id).unwrap();
-
-                let mut interpreter =
-                    Interpreter::new(self.compiler, callee.environment.clone());
-
-                interpreter.push();
-
-                for (name, argument) in
-                    function.params.iter().zip(arguments.into_iter())
-                {
-                    interpreter
-                        .environment
-                        .define(name.value.clone(), argument);
-                }
-
-                for stmt in &function.body.stmts {
-                    if let Some(break_value) =
-                        stmt.accept(&mut interpreter).break_value()
-                    {
-                        return break_value;
-                    }
-                }
-
-                Ok(Value::Nil)
+            CallableKind::Function(decoration) => {
+                let function = self.compiler.decls.get_fun(decoration).unwrap();
+                self.call_function(
+                    function,
+                    callee.environment.clone(),
+                    arguments,
+                )
             }
-            FunctionKind::Class(id) => Ok(Value::Instance(Instance::new(
-                id,
-                callee.environment.clone(),
-            ))),
+            CallableKind::Method {
+                decoration,
+                is_initializer,
+            } => {
+                let function = self.compiler.decls.get_fun(decoration).unwrap();
+                let result = self.call_function(
+                    function,
+                    callee.environment.clone(),
+                    arguments,
+                )?;
+                if is_initializer {
+                    Ok(callee.environment.get("this", 0).unwrap())
+                } else {
+                    Ok(result)
+                }
+            }
+            CallableKind::Class(decoration) => {
+                let instance = Value::Instance(Instance::new(
+                    decoration,
+                    callee.environment.clone(),
+                ));
+                if let Some(initializer) = self.find_initializer(decoration) {
+                    let environment =
+                        Environment::with_parent(callee.environment.clone());
+                    environment.define("this".to_string(), instance.clone());
+                    self.call_function(initializer, environment, arguments)?;
+                }
+                Ok(instance)
+            }
         }
     }
 
@@ -345,8 +398,11 @@ impl ExprVisitor for Interpreter<'_> {
                     Value::Instance(instance.clone()),
                 );
 
-                Ok(Value::Function(Function {
-                    kind: FunctionKind::Method(method.decoration),
+                Ok(Value::Callable(Callable {
+                    kind: CallableKind::Method {
+                        decoration: method.decoration,
+                        is_initializer: expr.name.value == "init",
+                    },
                     environment,
                 }))
             }
@@ -399,8 +455,8 @@ impl StmtVisitor for Interpreter<'_> {
     fn visit_fun_decl_stmt(&mut self, stmt: &FunDeclStmt) -> Self::Output {
         self.environment.define(
             stmt.function.name.value.clone(),
-            Value::Function(Function {
-                kind: FunctionKind::Function(stmt.function.decoration),
+            Value::Callable(Callable {
+                kind: CallableKind::Function(stmt.function.decoration),
                 environment: self.environment.clone(),
             }),
         );
@@ -411,8 +467,8 @@ impl StmtVisitor for Interpreter<'_> {
     fn visit_class_decl_stmt(&mut self, stmt: &ClassDeclStmt) -> Self::Output {
         self.environment.define(
             stmt.name.value.clone(),
-            Value::Function(Function {
-                kind: FunctionKind::Class(stmt.decoration),
+            Value::Callable(Callable {
+                kind: CallableKind::Class(stmt.decoration),
                 environment: self.environment.clone(),
             }),
         );

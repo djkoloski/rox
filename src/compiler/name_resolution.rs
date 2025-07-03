@@ -14,7 +14,7 @@ use crate::{
         },
     },
     compiler::CompileError,
-    span::Spanned as _,
+    span::{Span, Spanned as _},
 };
 
 pub struct NameResolution {
@@ -41,7 +41,7 @@ impl NameResolution {
             globals,
             locals: Vec::new(),
             errors: Vec::new(),
-            context: ContextKind::Global,
+            function_kind: FunctionKind::Free,
         }
     }
 }
@@ -53,9 +53,10 @@ impl Default for NameResolution {
 }
 
 #[derive(Clone, Copy)]
-enum ContextKind {
-    Global,
-    Class,
+enum FunctionKind {
+    Free,
+    Method,
+    Initializer { method: Span, class: Span },
 }
 
 pub struct NameResolutionPass<'a> {
@@ -63,7 +64,7 @@ pub struct NameResolutionPass<'a> {
     globals: &'a mut HashSet<String>,
     locals: Vec<HashSet<String>>,
     errors: Vec<CompileError>,
-    context: ContextKind,
+    function_kind: FunctionKind,
 }
 
 impl NameResolutionPass<'_> {
@@ -116,6 +117,10 @@ impl StmtVisitor for NameResolutionPass<'_> {
 
     fn visit_fun_decl_stmt(&mut self, stmt: &FunDeclStmt) -> Self::Output {
         self.define(stmt.function.name.value.clone());
+
+        let prev_function_kind = self.function_kind;
+        self.function_kind = FunctionKind::Free;
+
         self.locals.push(
             stmt.function
                 .params
@@ -127,18 +132,28 @@ impl StmtVisitor for NameResolutionPass<'_> {
             stmt.accept(self);
         }
         self.locals.pop();
+
+        self.function_kind = prev_function_kind;
     }
 
     fn visit_class_decl_stmt(&mut self, stmt: &ClassDeclStmt) -> Self::Output {
         self.define(stmt.name.value.clone());
 
-        let prev_context = self.context;
-        self.context = ContextKind::Class;
+        let prev_function_kind = self.function_kind;
 
         let mut locals = HashSet::new();
         locals.insert("this".to_string());
         self.locals.push(locals);
         for method in &stmt.methods {
+            self.function_kind = if method.name.value == "init" {
+                FunctionKind::Initializer {
+                    method: method.name.span,
+                    class: stmt.name.span,
+                }
+            } else {
+                FunctionKind::Method
+            };
+
             self.locals
                 .push(method.params.iter().map(|p| p.value.clone()).collect());
             for stmt in &method.body.stmts {
@@ -148,7 +163,7 @@ impl StmtVisitor for NameResolutionPass<'_> {
         }
         self.locals.pop();
 
-        self.context = prev_context;
+        self.function_kind = prev_function_kind;
     }
 
     fn visit_expr_stmt(&mut self, stmt: &ExprStmt) -> Self::Output {
@@ -173,6 +188,15 @@ impl StmtVisitor for NameResolutionPass<'_> {
     }
 
     fn visit_return_stmt(&mut self, stmt: &ReturnStmt) -> Self::Output {
+        if let FunctionKind::Initializer { method, class } = &self.function_kind
+        {
+            self.errors.push(CompileError::ReturnInInitializer {
+                method: *method,
+                span: stmt.return_.span(),
+                class: *class,
+            });
+        }
+
         if let Some(expr) = &stmt.expr {
             if self.locals.is_empty() {
                 self.errors.push(CompileError::TopLevelReturn {
@@ -243,7 +267,7 @@ impl ExprVisitor for NameResolutionPass<'_> {
     }
 
     fn visit_this_expr(&mut self, expr: &ThisExpr) -> Self::Output {
-        if !matches!(self.context, ContextKind::Class) {
+        if !matches!(self.function_kind, FunctionKind::Method) {
             self.errors
                 .push(CompileError::ThisOutsideClass { span: expr.span() });
             return;

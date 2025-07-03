@@ -13,7 +13,7 @@ use rox::{
     diagnostic::{Context, Diagnostic},
     interpreter::{
         environment::Environment,
-        value::{Function, FunctionKind, Value},
+        value::{Callable, CallableKind, Value},
         Interpreter,
     },
     parser::Parser,
@@ -76,8 +76,8 @@ fn make_globals() -> Arc<Environment> {
 
     environment.define(
         "clock".to_string(),
-        Value::Function(Function {
-            kind: FunctionKind::Clock,
+        Value::Callable(Callable {
+            kind: CallableKind::Clock,
             environment: environment.clone(),
         }),
     );

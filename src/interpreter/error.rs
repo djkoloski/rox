@@ -2,7 +2,7 @@ use core::fmt;
 
 use crate::{
     diagnostic::{Context, Diagnostic},
-    interpreter::value::{Function, Value},
+    interpreter::value::{Callable, Value},
     span::Span,
 };
 
@@ -24,7 +24,7 @@ pub enum InterpretError {
         span: Span,
         actual: Value,
     },
-    ExpectedFunction {
+    ExpectedCallable {
         span: Span,
         actual: Value,
     },
@@ -35,7 +35,7 @@ pub enum InterpretError {
     UninitializedVariable(Span),
     IncorrectFunctionArity {
         span: Span,
-        callee: Function,
+        callee: Callable,
         expected: usize,
         actual: usize,
     },
@@ -117,11 +117,11 @@ impl Diagnostic for InterpretError {
                     ),
                 )?;
             }
-            Self::ExpectedFunction { span, actual } => {
+            Self::ExpectedCallable { span, actual } => {
                 c.error(
                     f,
                     format_args!(
-                        "expected callee expression to evaluate to a function"
+                        "expected expression to evaluate to a callable value"
                     ),
                 )?;
                 c.span(
@@ -129,7 +129,7 @@ impl Diagnostic for InterpretError {
                     f,
                     format_args!(
                         "this expression evaluated to '{actual}' instead of a \
-                         function"
+                         callable value"
                     ),
                 )?;
             }
