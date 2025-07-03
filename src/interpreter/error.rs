@@ -39,6 +39,14 @@ pub enum InterpretError {
         expected: usize,
         actual: usize,
     },
+    ExpectedInstance {
+        span: Span,
+        actual: Value,
+    },
+    UndefinedProperty {
+        span: Span,
+        actual: Value,
+    },
 }
 
 impl Diagnostic for InterpretError {
@@ -179,6 +187,31 @@ impl Diagnostic for InterpretError {
                         "'{callee}' has arity {expected}, but was called with \
                          arity {actual}"
                     ),
+                )?;
+            }
+            Self::ExpectedInstance { span, actual } => {
+                c.error(
+                    f,
+                    format_args!(
+                        "expected get expression to evaluate to an instance"
+                    ),
+                )?;
+                c.span(
+                    *span,
+                    f,
+                    format_args!(
+                        "this expression evaluated to '{actual}' instead of \
+                         an instance"
+                    ),
+                )?;
+            }
+            Self::UndefinedProperty { span, actual } => {
+                let name = span.get(c.source());
+                c.error(f, format_args!("undefined property '{name}'"))?;
+                c.span(
+                    *span,
+                    f,
+                    format_args!("'{actual}' has no such property '{name}'"),
                 )?;
             }
         }

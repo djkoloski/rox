@@ -3,24 +3,31 @@ use std::collections::HashMap;
 use crate::ast::{
     decoration::Decoration,
     stmt::{
-        BlockStmt, ExprStmt, FunDeclStmt, IfStmt, PrintStmt, ReturnStmt,
-        StmtVisitor, VarDeclStmt, VisitStmt as _, WhileStmt,
+        BlockStmt, ClassDeclStmt, ExprStmt, FunDeclStmt, Function, IfStmt,
+        PrintStmt, ReturnStmt, StmtVisitor, VarDeclStmt, VisitStmt as _,
+        WhileStmt,
     },
 };
 
 pub struct Decls {
-    functions: HashMap<Decoration, FunDeclStmt>,
+    functions: HashMap<Decoration, Function>,
+    classes: HashMap<Decoration, ClassDeclStmt>,
 }
 
 impl Decls {
     pub fn new() -> Self {
         Self {
             functions: HashMap::new(),
+            classes: HashMap::new(),
         }
     }
 
-    pub fn get_fun(&self, id: Decoration) -> Option<&FunDeclStmt> {
+    pub fn get_fun(&self, id: Decoration) -> Option<&Function> {
         self.functions.get(&id)
+    }
+
+    pub fn get_class(&self, id: Decoration) -> Option<&ClassDeclStmt> {
+        self.classes.get(&id)
     }
 }
 
@@ -36,9 +43,20 @@ impl StmtVisitor for Decls {
     fn visit_var_decl_stmt(&mut self, _: &VarDeclStmt) -> Self::Output {}
 
     fn visit_fun_decl_stmt(&mut self, stmt: &FunDeclStmt) -> Self::Output {
-        self.functions.insert(stmt.decoration, stmt.clone());
+        self.functions
+            .insert(stmt.function.decoration, stmt.function.clone());
 
-        stmt.body.accept(self);
+        stmt.function.body.accept(self);
+    }
+
+    fn visit_class_decl_stmt(&mut self, stmt: &ClassDeclStmt) -> Self::Output {
+        self.classes.insert(stmt.decoration, stmt.clone());
+
+        for method in &stmt.methods {
+            self.functions.insert(method.decoration, method.clone());
+
+            method.body.accept(self);
+        }
     }
 
     fn visit_expr_stmt(&mut self, _: &ExprStmt) -> Self::Output {}

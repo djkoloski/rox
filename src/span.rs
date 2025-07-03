@@ -72,6 +72,16 @@ pub trait Spanned {
     }
 }
 
+impl Spanned for Span {
+    fn span_start(&self) -> usize {
+        self.start()
+    }
+
+    fn span_end(&self) -> usize {
+        self.end()
+    }
+}
+
 impl<T: Spanned + ?Sized> Spanned for Box<T> {
     fn span_start(&self) -> usize {
         T::span_start(self)

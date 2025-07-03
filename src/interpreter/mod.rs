@@ -9,19 +9,20 @@ use crate::{
     ast::{
         expr::{
             AssignExpr, BinaryExpr, BinaryOperator, CallExpr, Expr,
-            ExprVisitor, GroupingExpr, Literal, LiteralExpr, UnaryExpr,
-            UnaryOperator, VariableExpr, VisitExpr as _,
+            ExprVisitor, GetExpr, GroupingExpr, Literal, LiteralExpr, SetExpr,
+            ThisExpr, UnaryExpr, UnaryOperator, VariableExpr, VisitExpr as _,
         },
         stmt::{
-            BlockStmt, ExprStmt, FunDeclStmt, IfStmt, PrintStmt, Program, Repl,
-            ReturnStmt, StmtVisitor, VarDeclStmt, VisitStmt as _, WhileStmt,
+            BlockStmt, ClassDeclStmt, ExprStmt, FunDeclStmt, IfStmt, PrintStmt,
+            Program, Repl, ReturnStmt, StmtVisitor, VarDeclStmt,
+            VisitStmt as _, WhileStmt,
         },
     },
     compiler::Compiler,
     interpreter::{
         environment::Environment,
         error::InterpretError,
-        value::{Function, FunctionKind, Value},
+        value::{Function, FunctionKind, Instance, Value},
     },
     span::Spanned as _,
 };
@@ -257,9 +258,10 @@ impl ExprVisitor for Interpreter<'_> {
 
         let arity = match callee.kind {
             FunctionKind::Clock => 0,
-            FunctionKind::Decl(id) => {
+            FunctionKind::Function(id) | FunctionKind::Method(id) => {
                 self.compiler.decls.get_fun(id).unwrap().params.len()
             }
+            FunctionKind::Class(_) => 0,
         };
         if arity != expr.arguments.len() {
             return Err(InterpretError::IncorrectFunctionArity {
@@ -282,7 +284,7 @@ impl ExprVisitor for Interpreter<'_> {
                     .unwrap()
                     .as_secs_f64(),
             )),
-            FunctionKind::Decl(id) => {
+            FunctionKind::Function(id) | FunctionKind::Method(id) => {
                 let function = self.compiler.decls.get_fun(id).unwrap();
 
                 let mut interpreter =
@@ -308,7 +310,75 @@ impl ExprVisitor for Interpreter<'_> {
 
                 Ok(Value::Nil)
             }
+            FunctionKind::Class(id) => Ok(Value::Instance(Instance::new(
+                id,
+                callee.environment.clone(),
+            ))),
         }
+    }
+
+    fn visit_get_expr(&mut self, expr: &GetExpr) -> Self::Output {
+        match self.eval(&expr.instance)? {
+            Value::Instance(instance) => {
+                if let Some(field) = instance.get(&expr.name.value) {
+                    return Ok(field.clone());
+                }
+
+                let class =
+                    self.compiler.decls.get_class(instance.class()).unwrap();
+
+                let Some(method) = class
+                    .methods
+                    .iter()
+                    .find(|m| m.name.value == expr.name.value)
+                else {
+                    return Err(InterpretError::UndefinedProperty {
+                        span: expr.name.span(),
+                        actual: Value::Instance(instance),
+                    });
+                };
+
+                let environment =
+                    Environment::with_parent(instance.environment().clone());
+                environment.define(
+                    "this".to_string(),
+                    Value::Instance(instance.clone()),
+                );
+
+                Ok(Value::Function(Function {
+                    kind: FunctionKind::Method(method.decoration),
+                    environment,
+                }))
+            }
+            actual => Err(InterpretError::ExpectedInstance {
+                span: expr.instance.span(),
+                actual,
+            }),
+        }
+    }
+
+    fn visit_set_expr(&mut self, expr: &SetExpr) -> Self::Output {
+        match self.eval(&expr.instance)? {
+            Value::Instance(instance) => {
+                let value = self.eval(&expr.expr)?;
+                instance.set(expr.name.value.clone(), value.clone());
+                Ok(value)
+            }
+            actual => Err(InterpretError::ExpectedInstance {
+                span: expr.instance.span(),
+                actual,
+            }),
+        }
+    }
+
+    fn visit_this_expr(&mut self, expr: &ThisExpr) -> Self::Output {
+        let depth = self.compiler.name_resolution.get(expr.decoration).unwrap();
+        let value = self.environment.get("this", depth).unwrap();
+        if matches!(value, Value::Uninitialized) {
+            return Err(InterpretError::UninitializedVariable(expr.span()));
+        }
+
+        Ok(value.clone())
     }
 }
 
@@ -327,11 +397,22 @@ impl StmtVisitor for Interpreter<'_> {
     }
 
     fn visit_fun_decl_stmt(&mut self, stmt: &FunDeclStmt) -> Self::Output {
-        // TODO: can't reference functions before they're defined
+        self.environment.define(
+            stmt.function.name.value.clone(),
+            Value::Function(Function {
+                kind: FunctionKind::Function(stmt.function.decoration),
+                environment: self.environment.clone(),
+            }),
+        );
+
+        ControlFlow::Continue(())
+    }
+
+    fn visit_class_decl_stmt(&mut self, stmt: &ClassDeclStmt) -> Self::Output {
         self.environment.define(
             stmt.name.value.clone(),
             Value::Function(Function {
-                kind: FunctionKind::Decl(stmt.decoration),
+                kind: FunctionKind::Class(stmt.decoration),
                 environment: self.environment.clone(),
             }),
         );

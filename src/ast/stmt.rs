@@ -12,6 +12,7 @@ pub trait StmtVisitor {
 
     fn visit_var_decl_stmt(&mut self, stmt: &VarDeclStmt) -> Self::Output;
     fn visit_fun_decl_stmt(&mut self, stmt: &FunDeclStmt) -> Self::Output;
+    fn visit_class_decl_stmt(&mut self, stmt: &ClassDeclStmt) -> Self::Output;
     fn visit_expr_stmt(&mut self, stmt: &ExprStmt) -> Self::Output;
     fn visit_print_stmt(&mut self, stmt: &PrintStmt) -> Self::Output;
     fn visit_block_stmt(&mut self, stmt: &BlockStmt) -> Self::Output;
@@ -39,6 +40,7 @@ ast_node! {
     pub enum Stmt {
         VarDecl(VarDeclStmt),
         FunDecl(FunDeclStmt),
+        ClassDecl(ClassDeclStmt),
         Expr(ExprStmt),
         Print(PrintStmt),
         Block(BlockStmt),
@@ -57,8 +59,22 @@ ast_node! {
 
     #[visit(VisitStmt, StmtVisitor::visit_fun_decl_stmt)]
     pub struct FunDeclStmt {
-        pub decoration: Decoration,
         pub fun: Fun,
+        pub function: Function,
+    }
+
+    #[visit(VisitStmt, StmtVisitor::visit_class_decl_stmt)]
+    pub struct ClassDeclStmt {
+        pub decoration: Decoration,
+        pub class: Class,
+        pub name: Identifier,
+        pub lbrace: LeftBrace,
+        pub methods: Vec<Function>,
+        pub rbrace: RightBrace,
+    }
+
+    pub struct Function {
+        pub decoration: Decoration,
         pub name: Identifier,
         pub lparen: LeftParen,
         pub params: Punctuated<Identifier, Comma>,

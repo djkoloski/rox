@@ -4,12 +4,13 @@ use crate::{
     ast::{
         decoration::Decoration,
         expr::{
-            AssignExpr, BinaryExpr, ExprVisitor, GroupingExpr, LiteralExpr,
-            UnaryExpr, VariableExpr, VisitExpr as _,
+            AssignExpr, BinaryExpr, CallExpr, ExprVisitor, GetExpr,
+            GroupingExpr, LiteralExpr, SetExpr, ThisExpr, UnaryExpr,
+            VariableExpr, VisitExpr as _,
         },
         stmt::{
-            BlockStmt, ExprStmt, FunDeclStmt, IfStmt, PrintStmt, ReturnStmt,
-            StmtVisitor, VarDeclStmt, VisitStmt as _, WhileStmt,
+            BlockStmt, ClassDeclStmt, ExprStmt, FunDeclStmt, IfStmt, PrintStmt,
+            ReturnStmt, StmtVisitor, VarDeclStmt, VisitStmt as _, WhileStmt,
         },
     },
     compiler::CompileError,
@@ -40,6 +41,7 @@ impl NameResolution {
             globals,
             locals: Vec::new(),
             errors: Vec::new(),
+            context: ContextKind::Global,
         }
     }
 }
@@ -50,11 +52,18 @@ impl Default for NameResolution {
     }
 }
 
+#[derive(Clone, Copy)]
+enum ContextKind {
+    Global,
+    Class,
+}
+
 pub struct NameResolutionPass<'a> {
     resolution: &'a mut NameResolution,
     globals: &'a mut HashSet<String>,
     locals: Vec<HashSet<String>>,
     errors: Vec<CompileError>,
+    context: ContextKind,
 }
 
 impl NameResolutionPass<'_> {
@@ -106,13 +115,40 @@ impl StmtVisitor for NameResolutionPass<'_> {
     }
 
     fn visit_fun_decl_stmt(&mut self, stmt: &FunDeclStmt) -> Self::Output {
-        self.define(stmt.name.value.clone());
-        self.locals
-            .push(stmt.params.iter().map(|p| p.value.clone()).collect());
-        for stmt in stmt.body.stmts.iter() {
+        self.define(stmt.function.name.value.clone());
+        self.locals.push(
+            stmt.function
+                .params
+                .iter()
+                .map(|p| p.value.clone())
+                .collect(),
+        );
+        for stmt in &stmt.function.body.stmts {
             stmt.accept(self);
         }
         self.locals.pop();
+    }
+
+    fn visit_class_decl_stmt(&mut self, stmt: &ClassDeclStmt) -> Self::Output {
+        self.define(stmt.name.value.clone());
+
+        let prev_context = self.context;
+        self.context = ContextKind::Class;
+
+        let mut locals = HashSet::new();
+        locals.insert("this".to_string());
+        self.locals.push(locals);
+        for method in &stmt.methods {
+            self.locals
+                .push(method.params.iter().map(|p| p.value.clone()).collect());
+            for stmt in &method.body.stmts {
+                stmt.accept(self);
+            }
+            self.locals.pop();
+        }
+        self.locals.pop();
+
+        self.context = prev_context;
     }
 
     fn visit_expr_stmt(&mut self, stmt: &ExprStmt) -> Self::Output {
@@ -190,13 +226,30 @@ impl ExprVisitor for NameResolutionPass<'_> {
         expr.expr.accept(self);
     }
 
-    fn visit_call_expr(
-        &mut self,
-        expr: &crate::ast::expr::CallExpr,
-    ) -> Self::Output {
+    fn visit_call_expr(&mut self, expr: &CallExpr) -> Self::Output {
         expr.function.accept(self);
         for argument in expr.arguments.iter() {
             argument.accept(self);
         }
+    }
+
+    fn visit_get_expr(&mut self, expr: &GetExpr) -> Self::Output {
+        expr.instance.accept(self);
+    }
+
+    fn visit_set_expr(&mut self, expr: &SetExpr) -> Self::Output {
+        expr.instance.accept(self);
+        expr.expr.accept(self);
+    }
+
+    fn visit_this_expr(&mut self, expr: &ThisExpr) -> Self::Output {
+        if !matches!(self.context, ContextKind::Class) {
+            self.errors
+                .push(CompileError::ThisOutsideClass { span: expr.span() });
+            return;
+        }
+
+        let depth = self.resolve("this").unwrap();
+        self.resolution.resolutions.insert(expr.decoration, depth);
     }
 }

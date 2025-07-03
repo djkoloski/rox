@@ -4,19 +4,20 @@ use crate::{
     ast::{
         decoration::Decorator,
         expr::{
-            AssignExpr, BinaryExpr, BinaryOperator, CallExpr, Expr,
-            GroupingExpr, Literal, LiteralExpr, UnaryExpr, VariableExpr,
+            AssignExpr, BinaryExpr, BinaryOperator, CallExpr, Expr, GetExpr,
+            GroupingExpr, Literal, LiteralExpr, SetExpr, ThisExpr, UnaryExpr,
+            VariableExpr,
         },
         punctuated::Punctuated,
         stmt::{
-            BlockStmt, ExprStmt, FunDeclStmt, IfStmt, PrintStmt, Program, Repl,
-            ReturnStmt, Stmt, VarDeclStmt, WhileStmt,
+            BlockStmt, ClassDeclStmt, ExprStmt, FunDeclStmt, Function, IfStmt,
+            PrintStmt, Program, Repl, ReturnStmt, Stmt, VarDeclStmt, WhileStmt,
         },
     },
     diagnostic::{Context, Diagnostic},
     scanner::{
-        For, Fun, LeftBrace, RightBrace, RightParen, Semicolon, Token,
-        TokenKind, True, Var, While,
+        Dot, For, LeftBrace, LeftParen, RightBrace, RightParen, Semicolon,
+        Token, TokenKind, True, Var, While,
     },
     span::{Span, Spanned as _},
 };
@@ -24,12 +25,12 @@ use crate::{
 #[derive(Debug)]
 pub enum ParseError {
     ExpectedExpression(Span),
-    UnterminatedGroup(Span),
+    UnterminatedGroup { start: Span, end: Span },
     UnterminatedStatement { stmt: Span, next: Span },
-    UnterminatedBlock(Span),
-    ExpectedIdent { span: Span, next: Span },
+    UnterminatedBlock { start: Span, end: Span },
+    ExpectedIdent(Span),
     ExpectedLeftParen(Span),
-    ExpectedRightParen(Span),
+    ExpectedLeftBrace(Span),
     InvalidAssignmentTarget(Span),
     ExpectedSemicolon(Span),
 }
@@ -52,12 +53,22 @@ impl Diagnostic for ParseError {
                     ),
                 )?;
             }
-            Self::UnterminatedGroup(span) => {
+            Self::UnterminatedGroup { start, end } => {
                 c.error(f, format_args!("unterminated group"))?;
                 c.span(
-                    *span,
+                    *start,
                     f,
-                    format_args!("this group is missing a closing ')'"),
+                    format_args!(
+                        "the group started here is missing a closing ')'"
+                    ),
+                )?;
+                c.span(
+                    *end,
+                    f,
+                    format_args!(
+                        "insert a ')' before '{}'",
+                        end.get(c.source())
+                    ),
                 )?;
             }
             Self::UnterminatedStatement { stmt, next } => {
@@ -71,33 +82,35 @@ impl Diagnostic for ParseError {
                     ),
                 )?;
             }
-            Self::UnterminatedBlock(span) => {
+            Self::UnterminatedBlock { start, end } => {
                 c.error(f, format_args!("unterminated block"))?;
                 c.span(
-                    *span,
-                    f,
-                    format_args!("this block is missing a closing '}}'"),
-                )?;
-            }
-            Self::ExpectedIdent { span: stmt, next } => {
-                c.error(f, format_args!("expected identifier"))?;
-                c.span(
-                    *stmt,
+                    *start,
                     f,
                     format_args!(
-                        "this declaration was followed by '{}' instead of a \
-                         valid identifier",
-                        next.get(c.source())
+                        "the block started here is missing a closing '}}'"
                     ),
                 )?;
+                c.span(
+                    *end,
+                    f,
+                    format_args!(
+                        "insert a '}}' before '{}'",
+                        end.get(c.source())
+                    ),
+                )?;
+            }
+            Self::ExpectedIdent(span) => {
+                c.error(f, format_args!("expected identifier"))?;
+                c.span(*span, f, format_args!("expected an identifier here"))?;
             }
             Self::ExpectedLeftParen(span) => {
                 c.error(f, format_args!("missing opening parenthesis"))?;
                 c.span(*span, f, format_args!("expected a '(' here"))?;
             }
-            Self::ExpectedRightParen(span) => {
-                c.error(f, format_args!("missing closing parenthesis"))?;
-                c.span(*span, f, format_args!("expected a ')' here"))?;
+            Self::ExpectedLeftBrace(span) => {
+                c.error(f, format_args!("missing opening brace"))?;
+                c.span(*span, f, format_args!("expected a '{{' here"))?;
             }
             Self::InvalidAssignmentTarget(span) => {
                 c.error(f, format_args!("invalid assignment target"))?;
@@ -181,6 +194,7 @@ impl<'a> Parser<'a> {
         match self.peek() {
             Token::Var(_)
             | Token::Fun(_)
+            | Token::Class(_)
             | Token::Print(_)
             | Token::LeftBrace(_)
             | Token::If(_)
@@ -195,6 +209,7 @@ impl<'a> Parser<'a> {
         match self.peek() {
             Token::Var(_) => Some(self.var_decl_stmt()?.into()),
             Token::Fun(_) => Some(self.fun_decl_stmt()?.into()),
+            Token::Class(_) => Some(self.class_decl_stmt()?.into()),
             _ => self.statement(),
         }
     }
@@ -202,10 +217,8 @@ impl<'a> Parser<'a> {
     fn var_decl_stmt(&mut self) -> Option<VarDeclStmt> {
         let var = self.try_next::<Var>()?;
         let Some(ident) = self.try_next() else {
-            self.errors.push(ParseError::ExpectedIdent {
-                span: var.span(),
-                next: self.peek().span(),
-            });
+            self.errors
+                .push(ParseError::ExpectedIdent(self.peek().span()));
             return None;
         };
 
@@ -239,16 +252,57 @@ impl<'a> Parser<'a> {
     }
 
     fn fun_decl_stmt(&mut self) -> Option<FunDeclStmt> {
-        let fun = self.try_next::<Fun>()?;
+        let fun = self.try_next()?;
+        let function = self.function()?;
+
+        Some(FunDeclStmt { fun, function })
+    }
+
+    fn class_decl_stmt(&mut self) -> Option<ClassDeclStmt> {
+        let class = self.try_next()?;
         let Some(name) = self.try_next() else {
-            self.errors.push(ParseError::ExpectedIdent {
-                span: fun.span(),
-                next: self.peek().span(),
+            self.errors
+                .push(ParseError::ExpectedIdent(self.peek().span()));
+            return None;
+        };
+
+        let Some(lbrace) = self.try_next::<LeftBrace>() else {
+            self.errors
+                .push(ParseError::ExpectedLeftBrace(self.peek().span()));
+            return None;
+        };
+
+        let mut methods = Vec::new();
+        while !matches!(self.peek(), Token::RightBrace(_)) {
+            methods.push(self.function()?);
+        }
+
+        let Some(rbrace) = self.try_next() else {
+            self.errors.push(ParseError::UnterminatedBlock {
+                start: lbrace.span(),
+                end: self.peek().span(),
             });
             return None;
         };
 
-        let Some(lparen) = self.try_next() else {
+        Some(ClassDeclStmt {
+            decoration: self.decorator.decorate(),
+            class,
+            name,
+            lbrace,
+            methods,
+            rbrace,
+        })
+    }
+
+    fn function(&mut self) -> Option<Function> {
+        let Some(name) = self.try_next() else {
+            self.errors
+                .push(ParseError::ExpectedIdent(self.peek().span()));
+            return None;
+        };
+
+        let Some(lparen) = self.try_next::<LeftParen>() else {
             self.errors
                 .push(ParseError::ExpectedLeftParen(self.peek().span()));
             return None;
@@ -257,10 +311,8 @@ impl<'a> Parser<'a> {
         let mut params = Punctuated::new();
         while !matches!(self.peek(), Token::RightParen(_)) {
             let Some(ident) = self.try_next() else {
-                self.errors.push(ParseError::ExpectedIdent {
-                    span: fun.span(),
-                    next: self.peek().span(),
-                });
+                self.errors
+                    .push(ParseError::ExpectedIdent(self.peek().span()));
                 return None;
             };
             params.push(ident);
@@ -272,17 +324,18 @@ impl<'a> Parser<'a> {
         }
 
         let Some(rparen) = self.try_next() else {
-            self.errors
-                .push(ParseError::ExpectedRightParen(self.peek().span()));
+            self.errors.push(ParseError::UnterminatedGroup {
+                start: lparen.span(),
+                end: self.peek().span(),
+            });
             self.synchronize::<RightParen>();
             return None;
         };
 
         let body = self.block_stmt()?;
 
-        Some(FunDeclStmt {
+        Some(Function {
             decoration: self.decorator.decorate(),
-            fun,
             name,
             lparen,
             params,
@@ -338,15 +391,17 @@ impl<'a> Parser<'a> {
 
     fn while_stmt(&mut self) -> Option<WhileStmt> {
         let while_ = self.try_next()?;
-        let Some(lparen) = self.try_next() else {
+        let Some(lparen) = self.try_next::<LeftParen>() else {
             self.errors
                 .push(ParseError::ExpectedLeftParen(self.peek().span()));
             return None;
         };
         let expr = self.expression()?;
         let Some(rparen) = self.try_next() else {
-            self.errors
-                .push(ParseError::ExpectedRightParen(self.peek().span()));
+            self.errors.push(ParseError::UnterminatedGroup {
+                start: lparen.span(),
+                end: self.peek().span(),
+            });
             return None;
         };
         let body = self.statement()?;
@@ -362,7 +417,7 @@ impl<'a> Parser<'a> {
 
     fn for_stmt(&mut self) -> Option<Stmt> {
         let for_ = self.try_next::<For>()?;
-        let Some(lparen) = self.try_next() else {
+        let Some(lparen) = self.try_next::<LeftParen>() else {
             self.errors
                 .push(ParseError::ExpectedLeftParen(self.peek().span()));
             return None;
@@ -399,8 +454,10 @@ impl<'a> Parser<'a> {
         };
 
         let Some(rparen) = self.try_next() else {
-            self.errors
-                .push(ParseError::ExpectedRightParen(self.peek().span()));
+            self.errors.push(ParseError::UnterminatedGroup {
+                start: lparen.span(),
+                end: self.peek().span(),
+            });
             return None;
         };
 
@@ -467,12 +524,10 @@ impl<'a> Parser<'a> {
             match self.peek() {
                 Token::RightBrace(_) => break,
                 Token::Eof(_) => {
-                    let span = if stmts.is_empty() {
-                        lbrace.span()
-                    } else {
-                        Span::across(&lbrace, stmts.last().unwrap())
-                    };
-                    self.errors.push(ParseError::UnterminatedBlock(span));
+                    self.errors.push(ParseError::UnterminatedBlock {
+                        start: lbrace.span(),
+                        end: self.peek().span(),
+                    });
                     return None;
                 }
                 _ => stmts.push(self.declaration()?),
@@ -511,17 +566,31 @@ impl<'a> Parser<'a> {
         if let Some(equal) = self.try_next() {
             let value = self.assignment()?;
 
-            if let Expr::Variable(VariableExpr { decoration, ident }) = expr {
-                Some(Expr::Assign(AssignExpr {
-                    decoration,
-                    ident,
+            match expr {
+                Expr::Get(GetExpr {
+                    instance,
+                    dot,
+                    name,
+                }) => Some(Expr::Set(SetExpr {
+                    instance,
+                    dot,
+                    name,
                     equal,
                     expr: Box::new(value),
-                }))
-            } else {
-                self.errors
-                    .push(ParseError::InvalidAssignmentTarget(expr.span()));
-                None
+                })),
+                Expr::Variable(VariableExpr { decoration, ident }) => {
+                    Some(Expr::Assign(AssignExpr {
+                        decoration,
+                        ident,
+                        equal,
+                        expr: Box::new(value),
+                    }))
+                }
+                _ => {
+                    self.errors
+                        .push(ParseError::InvalidAssignmentTarget(expr.span()));
+                    None
+                }
             }
         } else {
             Some(expr)
@@ -613,30 +682,53 @@ impl<'a> Parser<'a> {
     fn call(&mut self) -> Option<Expr> {
         let mut expr = self.primary()?;
 
-        while let Some(lparen) = self.try_next() {
-            let mut arguments = Punctuated::new();
-            while !matches!(self.peek(), Token::RightParen(_)) {
-                arguments.push(self.expression()?);
-                if let Some(comma) = self.try_next() {
-                    arguments.push_punct(comma);
-                } else {
-                    break;
+        loop {
+            match self.peek() {
+                Token::LeftParen(_) => {
+                    let lparen = self.expect::<LeftParen>();
+                    let mut arguments = Punctuated::new();
+                    while !matches!(self.peek(), Token::RightParen(_)) {
+                        arguments.push(self.expression()?);
+                        if let Some(comma) = self.try_next() {
+                            arguments.push_punct(comma);
+                        } else {
+                            break;
+                        }
+                    }
+
+                    let Some(rparen) = self.try_next() else {
+                        self.errors.push(ParseError::UnterminatedGroup {
+                            start: lparen.span(),
+                            end: self.peek().span(),
+                        });
+                        self.synchronize::<RightParen>();
+                        return None;
+                    };
+
+                    expr = Expr::Call(CallExpr {
+                        function: Box::new(expr),
+                        lparen,
+                        arguments,
+                        rparen,
+                    });
                 }
+                Token::Dot(_) => {
+                    let dot = self.expect::<Dot>();
+                    let Some(name) = self.try_next() else {
+                        self.errors.push(ParseError::ExpectedIdent(
+                            self.peek().span(),
+                        ));
+                        return None;
+                    };
+
+                    expr = Expr::Get(GetExpr {
+                        instance: Box::new(expr),
+                        dot,
+                        name,
+                    });
+                }
+                _ => break,
             }
-
-            let Some(rparen) = self.try_next() else {
-                self.errors
-                    .push(ParseError::ExpectedRightParen(self.peek().span()));
-                self.synchronize::<RightParen>();
-                return None;
-            };
-
-            expr = Expr::Call(CallExpr {
-                function: Box::new(expr),
-                lparen,
-                arguments,
-                rparen,
-            });
         }
 
         Some(expr)
@@ -655,6 +747,10 @@ impl<'a> Parser<'a> {
             Token::Identifier(_) => Some(Expr::Variable(VariableExpr {
                 decoration: self.decorator.decorate(),
                 ident: self.expect(),
+            })),
+            Token::This(_) => Some(Expr::This(ThisExpr {
+                decoration: self.decorator.decorate(),
+                this: self.expect(),
             })),
             _ => {
                 self.errors
@@ -683,9 +779,10 @@ impl<'a> Parser<'a> {
                 rparen: self.expect(),
             }),
             _ => {
-                self.errors.push(ParseError::UnterminatedGroup(Span::across(
-                    &lparen, &inner,
-                )));
+                self.errors.push(ParseError::UnterminatedGroup {
+                    start: lparen.span(),
+                    end: self.peek().span(),
+                });
 
                 self.synchronize::<RightParen>();
 

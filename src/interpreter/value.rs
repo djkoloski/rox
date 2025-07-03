@@ -1,5 +1,8 @@
 use core::fmt;
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use crate::{
     ast::decoration::Decoration, interpreter::environment::Environment,
@@ -13,7 +16,7 @@ pub enum Value {
     Number(f64),
     String(String),
     Function(Function),
-    // Object(???),
+    Instance(Instance),
 }
 
 impl fmt::Display for Value {
@@ -31,6 +34,7 @@ impl fmt::Display for Value {
             Self::Number(n) => write!(f, "{n}"),
             Self::String(s) => write!(f, "{s}"),
             Self::Function(n) => write!(f, "{n}"),
+            Self::Instance(i) => write!(f, "{i}"),
         }
     }
 }
@@ -40,7 +44,10 @@ impl Value {
         match self {
             Self::Uninitialized | Self::Nil => false,
             Self::Bool(b) => *b,
-            Self::Number(_) | Self::String(_) | Self::Function(_) => true,
+            Self::Number(_)
+            | Self::String(_)
+            | Self::Function(_)
+            | Self::Instance(_) => true,
         }
     }
 }
@@ -61,8 +68,16 @@ impl PartialEq for Function {
 impl fmt::Display for Function {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.kind {
-            FunctionKind::Clock => write!(f, "<builtin fun clock()>")?,
-            FunctionKind::Decl(decl) => write!(f, "<decl fun {decl:?}>")?,
+            FunctionKind::Clock => write!(f, "<builtin clock()>")?,
+            FunctionKind::Function(decoration) => {
+                write!(f, "<fun {decoration:?}>")?
+            }
+            FunctionKind::Class(decoration) => {
+                write!(f, "<class {decoration:?}>")?
+            }
+            FunctionKind::Method(decoration) => {
+                write!(f, "<method {decoration:?}>")?
+            }
         }
 
         Ok(())
@@ -72,5 +87,52 @@ impl fmt::Display for Function {
 #[derive(Debug, Clone, PartialEq)]
 pub enum FunctionKind {
     Clock,
-    Decl(Decoration),
+    Function(Decoration),
+    Class(Decoration),
+    Method(Decoration),
+}
+
+#[derive(Debug, Clone)]
+pub struct Instance {
+    class: Decoration,
+    environment: Arc<Environment>,
+    fields: Arc<Mutex<HashMap<String, Value>>>,
+}
+
+impl Instance {
+    pub fn new(class: Decoration, environment: Arc<Environment>) -> Self {
+        Self {
+            class,
+            environment,
+            fields: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    pub fn class(&self) -> Decoration {
+        self.class
+    }
+
+    pub fn environment(&self) -> &Arc<Environment> {
+        &self.environment
+    }
+
+    pub fn get(&self, name: &str) -> Option<Value> {
+        self.fields.lock().unwrap().get(name).cloned()
+    }
+
+    pub fn set(&self, name: String, value: Value) {
+        self.fields.lock().unwrap().insert(name, value);
+    }
+}
+
+impl PartialEq for Instance {
+    fn eq(&self, other: &Self) -> bool {
+        self.class == other.class && Arc::ptr_eq(&self.fields, &other.fields)
+    }
+}
+
+impl fmt::Display for Instance {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "<instance {:?}>", self.class)
+    }
 }

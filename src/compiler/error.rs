@@ -9,6 +9,7 @@ use crate::{
 pub enum CompileError {
     UndefinedVariable { span: Span },
     TopLevelReturn { span: Span },
+    ThisOutsideClass { span: Span },
 }
 
 impl Diagnostic for CompileError {
@@ -39,6 +40,20 @@ impl Diagnostic for CompileError {
                     f,
                     format_args!(
                         "this `return` should be contained in a function"
+                    ),
+                )?;
+            }
+            Self::ThisOutsideClass { span } => {
+                c.error(
+                    f,
+                    format_args!("`this` may not be used outside of a class"),
+                )?;
+                c.span(
+                    *span,
+                    f,
+                    format_args!(
+                        "`this` always refers to the instance of the \
+                         enclosing class"
                     ),
                 )?;
             }
