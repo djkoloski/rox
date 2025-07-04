@@ -11,7 +11,8 @@ use crate::{
         expr::{
             AssignExpr, BinaryExpr, BinaryOperator, CallExpr, Expr,
             ExprVisitor, GetExpr, GroupingExpr, Literal, LiteralExpr, SetExpr,
-            ThisExpr, UnaryExpr, UnaryOperator, VariableExpr, VisitExpr as _,
+            SuperExpr, ThisExpr, UnaryExpr, UnaryOperator, VariableExpr,
+            VisitExpr as _,
         },
         stmt::{
             BlockStmt, ClassDeclStmt, ExprStmt, FunDeclStmt, Function, IfStmt,
@@ -377,22 +378,46 @@ impl ExprVisitor for Interpreter<'_> {
                     return Ok(field.clone());
                 }
 
-                let class =
-                    self.compiler.decls.get_class(instance.class()).unwrap();
+                let mut decoration = instance.class();
+                let mut environment = instance.environment().clone();
+                let mut method = None;
 
-                let Some(method) = class
-                    .methods
-                    .iter()
-                    .find(|m| m.name.value == expr.name.value)
-                else {
+                loop {
+                    let class =
+                        self.compiler.decls.get_class(decoration).unwrap();
+
+                    if let Some(m) = class
+                        .methods
+                        .iter()
+                        .find(|m| m.name.value == expr.name.value)
+                    {
+                        method = Some(m);
+                        break;
+                    }
+
+                    if environment.parent().is_some() {
+                        if let Some(Value::Callable(Callable {
+                            kind: CallableKind::Class(d),
+                            environment: e,
+                        })) = environment.get("super", 0)
+                        {
+                            decoration = d;
+                            environment = e;
+                            continue;
+                        }
+                    }
+
+                    break;
+                }
+
+                let Some(method) = method else {
                     return Err(InterpretError::UndefinedProperty {
                         span: expr.name.span(),
                         actual: Value::Instance(instance),
                     });
                 };
 
-                let environment =
-                    Environment::with_parent(instance.environment().clone());
+                let environment = Environment::with_parent(environment);
                 environment.define(
                     "this".to_string(),
                     Value::Instance(instance.clone()),
@@ -430,11 +455,69 @@ impl ExprVisitor for Interpreter<'_> {
     fn visit_this_expr(&mut self, expr: &ThisExpr) -> Self::Output {
         let depth = self.compiler.name_resolution.get(expr.decoration).unwrap();
         let value = self.environment.get("this", depth).unwrap();
-        if matches!(value, Value::Uninitialized) {
-            return Err(InterpretError::UninitializedVariable(expr.span()));
-        }
 
         Ok(value.clone())
+    }
+
+    fn visit_super_expr(&mut self, expr: &SuperExpr) -> Self::Output {
+        let this = self.environment.get("this", 1).unwrap();
+        let depth = self.compiler.name_resolution.get(expr.decoration).unwrap();
+        let super_ = self.environment.get("super", depth).unwrap();
+
+        let Value::Callable(Callable {
+            kind: CallableKind::Class(mut decoration),
+            mut environment,
+        }) = super_
+        else {
+            unreachable!();
+        };
+
+        let mut method = None;
+
+        loop {
+            let class = self.compiler.decls.get_class(decoration).unwrap();
+
+            if let Some(m) = class
+                .methods
+                .iter()
+                .find(|m| m.name.value == expr.name.value)
+            {
+                method = Some(m);
+                break;
+            }
+
+            if environment.parent().is_some() {
+                if let Some(Value::Callable(Callable {
+                    kind: CallableKind::Class(d),
+                    environment: e,
+                })) = environment.get("super", 0)
+                {
+                    decoration = d;
+                    environment = e;
+                    continue;
+                }
+            }
+
+            break;
+        }
+
+        let Some(method) = method else {
+            return Err(InterpretError::UndefinedProperty {
+                span: expr.name.span(),
+                actual: this,
+            });
+        };
+
+        let environment = Environment::with_parent(environment);
+        environment.define("this".to_string(), this);
+
+        Ok(Value::Callable(Callable {
+            kind: CallableKind::Method {
+                decoration: method.decoration,
+                is_initializer: expr.name.value == "init",
+            },
+            environment,
+        }))
     }
 }
 
@@ -465,11 +548,41 @@ impl StmtVisitor for Interpreter<'_> {
     }
 
     fn visit_class_decl_stmt(&mut self, stmt: &ClassDeclStmt) -> Self::Output {
+        let mut environment = self.environment.clone();
+
+        if let Some(inheritance) = &stmt.inheritance {
+            environment = Environment::with_parent(environment);
+            let depth = self
+                .compiler
+                .name_resolution
+                .get(inheritance.decoration)
+                .unwrap();
+            let superclass = self
+                .environment
+                .get(&inheritance.superclass.value, depth)
+                .unwrap();
+            if !matches!(
+                superclass,
+                Value::Callable(Callable {
+                    kind: CallableKind::Class(_),
+                    ..
+                })
+            ) {
+                return ControlFlow::Break(Err(
+                    InterpretError::ExpectedClass {
+                        span: inheritance.superclass.span(),
+                        actual: superclass,
+                    },
+                ));
+            }
+            environment.define("super".to_string(), superclass);
+        }
+
         self.environment.define(
             stmt.name.value.clone(),
             Value::Callable(Callable {
                 kind: CallableKind::Class(stmt.decoration),
-                environment: self.environment.clone(),
+                environment,
             }),
         );
 

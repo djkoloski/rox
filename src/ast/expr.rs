@@ -3,7 +3,7 @@ use crate::{
     scanner::{
         And, Bang, BangEqual, Comma, Dot, Equal, EqualEqual, False, Greater,
         GreaterEqual, Identifier, LeftParen, Less, LessEqual, Minus, Nil,
-        Number, Or, Plus, RightParen, Slash, Star, String, This, True,
+        Number, Or, Plus, RightParen, Slash, Star, String, Super, This, True,
     },
 };
 
@@ -20,6 +20,7 @@ pub trait ExprVisitor {
     fn visit_get_expr(&mut self, expr: &GetExpr) -> Self::Output;
     fn visit_set_expr(&mut self, expr: &SetExpr) -> Self::Output;
     fn visit_this_expr(&mut self, expr: &ThisExpr) -> Self::Output;
+    fn visit_super_expr(&mut self, expr: &SuperExpr) -> Self::Output;
 }
 
 pub trait VisitExpr<V: ExprVisitor> {
@@ -39,6 +40,7 @@ ast_node! {
         Get(GetExpr),
         Set(SetExpr),
         This(ThisExpr),
+        Super(SuperExpr),
     }
 
     #[visit(VisitExpr, ExprVisitor::visit_literal_expr)]
@@ -143,5 +145,13 @@ ast_node! {
     pub struct ThisExpr {
         pub decoration: Decoration,
         pub this: This,
+    }
+
+    #[visit(VisitExpr, ExprVisitor::visit_super_expr)]
+    pub struct SuperExpr {
+        pub decoration: Decoration,
+        pub super_: Super,
+        pub dot: Dot,
+        pub name: Identifier,
     }
 }

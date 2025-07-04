@@ -5,13 +5,14 @@ use crate::{
         decoration::Decorator,
         expr::{
             AssignExpr, BinaryExpr, BinaryOperator, CallExpr, Expr, GetExpr,
-            GroupingExpr, Literal, LiteralExpr, SetExpr, ThisExpr, UnaryExpr,
-            VariableExpr,
+            GroupingExpr, Literal, LiteralExpr, SetExpr, SuperExpr, ThisExpr,
+            UnaryExpr, VariableExpr,
         },
         punctuated::Punctuated,
         stmt::{
             BlockStmt, ClassDeclStmt, ExprStmt, FunDeclStmt, Function, IfStmt,
-            PrintStmt, Program, Repl, ReturnStmt, Stmt, VarDeclStmt, WhileStmt,
+            Inheritance, PrintStmt, Program, Repl, ReturnStmt, Stmt,
+            VarDeclStmt, WhileStmt,
         },
     },
     diagnostic::{Context, Diagnostic},
@@ -33,6 +34,7 @@ pub enum ParseError {
     ExpectedLeftBrace(Span),
     InvalidAssignmentTarget(Span),
     ExpectedSemicolon(Span),
+    ExpectedDot(Span),
 }
 
 impl Diagnostic for ParseError {
@@ -125,7 +127,11 @@ impl Diagnostic for ParseError {
             }
             Self::ExpectedSemicolon(span) => {
                 c.error(f, format_args!("missing semicolon"))?;
-                c.span(*span, f, format_args!("expected a semicolon here"))?;
+                c.span(*span, f, format_args!("expected a ';' here"))?;
+            }
+            Self::ExpectedDot(span) => {
+                c.error(f, format_args!("missing dot"))?;
+                c.span(*span, f, format_args!("expected a '.' here"))?;
             }
         }
         Ok(())
@@ -266,6 +272,20 @@ impl<'a> Parser<'a> {
             return None;
         };
 
+        let mut inheritance = None;
+        if let Some(less) = self.try_next() {
+            let Some(superclass) = self.try_next() else {
+                self.errors
+                    .push(ParseError::ExpectedIdent(self.peek().span()));
+                return None;
+            };
+            inheritance = Some(Inheritance {
+                decoration: self.decorator.decorate(),
+                less,
+                superclass,
+            });
+        }
+
         let Some(lbrace) = self.try_next::<LeftBrace>() else {
             self.errors
                 .push(ParseError::ExpectedLeftBrace(self.peek().span()));
@@ -289,6 +309,7 @@ impl<'a> Parser<'a> {
             decoration: self.decorator.decorate(),
             class,
             name,
+            inheritance,
             lbrace,
             methods,
             rbrace,
@@ -752,6 +773,25 @@ impl<'a> Parser<'a> {
                 decoration: self.decorator.decorate(),
                 this: self.expect(),
             })),
+            Token::Super(_) => {
+                let super_ = self.expect();
+                let Some(dot) = self.try_next() else {
+                    self.errors
+                        .push(ParseError::ExpectedDot(self.peek().span()));
+                    return None;
+                };
+                let Some(name) = self.try_next() else {
+                    self.errors
+                        .push(ParseError::ExpectedIdent(self.peek().span()));
+                    return None;
+                };
+                Some(Expr::Super(SuperExpr {
+                    decoration: self.decorator.decorate(),
+                    super_,
+                    dot,
+                    name,
+                }))
+            }
             _ => {
                 self.errors
                     .push(ParseError::ExpectedExpression(self.peek().span()));

@@ -16,6 +16,9 @@ pub enum CompileError {
     ThisOutsideClass {
         span: Span,
     },
+    SuperOutsideClass {
+        span: Span,
+    },
     ReturnInInitializer {
         method: Span,
         span: Span,
@@ -65,6 +68,20 @@ impl Diagnostic for CompileError {
                     format_args!(
                         "`this` always refers to the instance of the \
                          enclosing class"
+                    ),
+                )?;
+            }
+            Self::SuperOutsideClass { span } => {
+                c.error(
+                    f,
+                    format_args!("`super` may not be used outside of a class"),
+                )?;
+                c.span(
+                    *span,
+                    f,
+                    format_args!(
+                        "`super` always refers to the parent of the enclosing \
+                         class"
                     ),
                 )?;
             }

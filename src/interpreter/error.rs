@@ -47,6 +47,10 @@ pub enum InterpretError {
         span: Span,
         actual: Value,
     },
+    ExpectedClass {
+        span: Span,
+        actual: Value,
+    },
 }
 
 impl Diagnostic for InterpretError {
@@ -212,6 +216,18 @@ impl Diagnostic for InterpretError {
                     *span,
                     f,
                     format_args!("'{actual}' has no such property '{name}'"),
+                )?;
+            }
+            Self::ExpectedClass { span, actual } => {
+                c.error(f, format_args!("expected superclass to be a class"))?;
+                c.span(
+                    *span,
+                    f,
+                    format_args!(
+                        "'{}' was '{}', not a class",
+                        span.get(c.source()),
+                        actual
+                    ),
                 )?;
             }
         }

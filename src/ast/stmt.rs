@@ -68,9 +68,16 @@ ast_node! {
         pub decoration: Decoration,
         pub class: Class,
         pub name: Identifier,
+        pub inheritance: Option<Inheritance>,
         pub lbrace: LeftBrace,
         pub methods: Vec<Function>,
         pub rbrace: RightBrace,
+    }
+
+    pub struct Inheritance {
+        pub decoration: Decoration,
+        pub less: Less,
+        pub superclass: Identifier,
     }
 
     pub struct Function {

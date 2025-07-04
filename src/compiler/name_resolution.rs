@@ -5,7 +5,7 @@ use crate::{
         decoration::Decoration,
         expr::{
             AssignExpr, BinaryExpr, CallExpr, ExprVisitor, GetExpr,
-            GroupingExpr, LiteralExpr, SetExpr, ThisExpr, UnaryExpr,
+            GroupingExpr, LiteralExpr, SetExpr, SuperExpr, ThisExpr, UnaryExpr,
             VariableExpr, VisitExpr as _,
         },
         stmt::{
@@ -137,13 +137,34 @@ impl StmtVisitor for NameResolutionPass<'_> {
     }
 
     fn visit_class_decl_stmt(&mut self, stmt: &ClassDeclStmt) -> Self::Output {
+        if let Some(inheritance) = &stmt.inheritance {
+            let Some(depth) = self.resolve(&inheritance.superclass.value)
+            else {
+                self.errors.push(CompileError::UndefinedVariable {
+                    span: inheritance.superclass.span(),
+                });
+                return;
+            };
+
+            self.resolution
+                .resolutions
+                .insert(inheritance.decoration, depth);
+        }
+
         self.define(stmt.name.value.clone());
 
         let prev_function_kind = self.function_kind;
 
-        let mut locals = HashSet::new();
-        locals.insert("this".to_string());
-        self.locals.push(locals);
+        if stmt.inheritance.is_some() {
+            let mut super_locals = HashSet::new();
+            super_locals.insert("super".to_string());
+            self.locals.push(super_locals);
+        }
+
+        let mut this_locals = HashSet::new();
+        this_locals.insert("this".to_string());
+        self.locals.push(this_locals);
+
         for method in &stmt.methods {
             self.function_kind = if method.name.value == "init" {
                 FunctionKind::Initializer {
@@ -161,7 +182,12 @@ impl StmtVisitor for NameResolutionPass<'_> {
             }
             self.locals.pop();
         }
+
         self.locals.pop();
+
+        if stmt.inheritance.is_some() {
+            self.locals.pop();
+        }
 
         self.function_kind = prev_function_kind;
     }
@@ -274,6 +300,17 @@ impl ExprVisitor for NameResolutionPass<'_> {
         }
 
         let depth = self.resolve("this").unwrap();
+        self.resolution.resolutions.insert(expr.decoration, depth);
+    }
+
+    fn visit_super_expr(&mut self, expr: &SuperExpr) -> Self::Output {
+        if !matches!(self.function_kind, FunctionKind::Method) {
+            self.errors
+                .push(CompileError::SuperOutsideClass { span: expr.span() });
+            return;
+        }
+
+        let depth = self.resolve("super").unwrap();
         self.resolution.resolutions.insert(expr.decoration, depth);
     }
 }
