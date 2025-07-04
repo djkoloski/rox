@@ -7,7 +7,7 @@ use std::{
     sync::Arc,
 };
 
-use rox::{
+use roxi::{
     ast::decoration::Decorator,
     compiler::Compiler,
     diagnostic::{Context, Diagnostic},
