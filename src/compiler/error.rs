@@ -16,7 +16,7 @@ pub enum CompileError {
     ThisOutsideClass {
         span: Span,
     },
-    SuperOutsideClass {
+    SuperOutsideSubclass {
         span: Span,
     },
     ReturnInInitializer {
@@ -71,10 +71,12 @@ impl Diagnostic for CompileError {
                     ),
                 )?;
             }
-            Self::SuperOutsideClass { span } => {
+            Self::SuperOutsideSubclass { span } => {
                 c.error(
                     f,
-                    format_args!("`super` may not be used outside of a class"),
+                    format_args!(
+                        "`super` may not be used outside of a subclass"
+                    ),
                 )?;
                 c.span(
                     *span,

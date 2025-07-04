@@ -42,6 +42,7 @@ impl NameResolution {
             locals: Vec::new(),
             errors: Vec::new(),
             function_kind: FunctionKind::Free,
+            is_subclass: false,
         }
     }
 }
@@ -65,6 +66,7 @@ pub struct NameResolutionPass<'a> {
     locals: Vec<HashSet<String>>,
     errors: Vec<CompileError>,
     function_kind: FunctionKind,
+    is_subclass: bool,
 }
 
 impl NameResolutionPass<'_> {
@@ -137,6 +139,8 @@ impl StmtVisitor for NameResolutionPass<'_> {
     }
 
     fn visit_class_decl_stmt(&mut self, stmt: &ClassDeclStmt) -> Self::Output {
+        let was_subclass = self.is_subclass;
+
         if let Some(inheritance) = &stmt.inheritance {
             let Some(depth) = self.resolve(&inheritance.superclass.value)
             else {
@@ -149,6 +153,8 @@ impl StmtVisitor for NameResolutionPass<'_> {
             self.resolution
                 .resolutions
                 .insert(inheritance.decoration, depth);
+
+            self.is_subclass = true;
         }
 
         self.define(stmt.name.value.clone());
@@ -190,6 +196,7 @@ impl StmtVisitor for NameResolutionPass<'_> {
         }
 
         self.function_kind = prev_function_kind;
+        self.is_subclass = was_subclass;
     }
 
     fn visit_expr_stmt(&mut self, stmt: &ExprStmt) -> Self::Output {
@@ -304,9 +311,11 @@ impl ExprVisitor for NameResolutionPass<'_> {
     }
 
     fn visit_super_expr(&mut self, expr: &SuperExpr) -> Self::Output {
-        if !matches!(self.function_kind, FunctionKind::Method) {
-            self.errors
-                .push(CompileError::SuperOutsideClass { span: expr.span() });
+        if matches!(self.function_kind, FunctionKind::Free) || !self.is_subclass
+        {
+            self.errors.push(CompileError::SuperOutsideSubclass {
+                span: expr.super_.span(),
+            });
             return;
         }
 
