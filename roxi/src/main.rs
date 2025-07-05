@@ -12,9 +12,9 @@ use roxi::{
     compiler::Compiler,
     diagnostic::{Context, Diagnostic},
     interpreter::{
+        Interpreter,
         environment::Environment,
         value::{Callable, CallableKind, Value},
-        Interpreter,
     },
     parser::Parser,
     scanner::Scanner,

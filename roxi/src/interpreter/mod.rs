@@ -395,16 +395,15 @@ impl ExprVisitor for Interpreter<'_> {
                         break;
                     }
 
-                    if environment.parent().is_some() {
-                        if let Some(Value::Callable(Callable {
+                    if environment.parent().is_some()
+                        && let Some(Value::Callable(Callable {
                             kind: CallableKind::Class(d),
                             environment: e,
                         })) = environment.get("super", 0)
-                        {
-                            decoration = d;
-                            environment = e;
-                            continue;
-                        }
+                    {
+                        decoration = d;
+                        environment = e;
+                        continue;
                     }
 
                     break;
@@ -486,16 +485,15 @@ impl ExprVisitor for Interpreter<'_> {
                 break;
             }
 
-            if environment.parent().is_some() {
-                if let Some(Value::Callable(Callable {
+            if environment.parent().is_some()
+                && let Some(Value::Callable(Callable {
                     kind: CallableKind::Class(d),
                     environment: e,
                 })) = environment.get("super", 0)
-                {
-                    decoration = d;
-                    environment = e;
-                    continue;
-                }
+            {
+                decoration = d;
+                environment = e;
+                continue;
             }
 
             break;

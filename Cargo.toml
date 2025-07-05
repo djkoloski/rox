@@ -1,5 +1,7 @@
 [workspace]
 members = [
+    "rox",
+    "roxc",
     "roxi",
 ]
-resolver = "2"
+resolver = "3"
