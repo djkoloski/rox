@@ -1,6 +1,6 @@
 use core::{fmt, num::ParseFloatError};
 
-use rox_diag::{Context, Diagnostic, Span};
+use rox_diag::{Diagnostic, Formatter, Span};
 
 use crate::{Token, token_kind::*};
 
@@ -13,17 +13,12 @@ pub enum ScanError {
 }
 
 impl Diagnostic for ScanError {
-    fn fmt(
-        &self,
-        c: &mut Context<'_>,
-        f: &mut fmt::Formatter<'_>,
-    ) -> fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnexpectedCharacter { span, char } => {
-                c.error(f, format_args!("unexpected character"))?;
-                c.span(
+                f.error(format_args!("unexpected character"))?;
+                f.span(
                     *span,
-                    f,
                     format_args!(
                         "'{}' (0x{char:x}) is not valid syntax",
                         *char as char
@@ -31,31 +26,28 @@ impl Diagnostic for ScanError {
                 )?;
             }
             Self::UnterminatedBlockComment(span) => {
-                c.error(f, format_args!("unterminated block comment"))?;
-                c.span(
+                f.error(format_args!("unterminated block comment"))?;
+                f.span(
                     *span,
-                    f,
                     format_args!(
                         "this block comment is missing a closing tag (*/)"
                     ),
                 )?;
             }
             Self::UnterminatedString(span) => {
-                c.error(f, format_args!("unterminated string"))?;
-                c.span(
+                f.error(format_args!("unterminated string"))?;
+                f.span(
                     *span,
-                    f,
                     format_args!("this string is missing a closing quote (\")"),
                 )?;
             }
             Self::InvalidNumber { span, error } => {
-                c.error(f, format_args!("invalid number"))?;
-                c.span(
+                f.error(format_args!("invalid number"))?;
+                f.span(
                     *span,
-                    f,
                     format_args!(
                         "failed to parse '{}' as a number: {error}",
-                        span.get(c.source())
+                        span.get(f.source())
                     ),
                 )?;
             }

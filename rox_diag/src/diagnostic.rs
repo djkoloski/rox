@@ -34,8 +34,9 @@ impl Position {
     }
 }
 
-pub struct Context<'s> {
-    source: &'s str,
+pub struct Formatter<'a> {
+    source: &'a str,
+    formatter: &'a mut fmt::Formatter<'a>,
 }
 
 const BRIGHT_RED: &str = "\x1b[31;1m";
@@ -43,27 +44,25 @@ const BRIGHT_WHITE: &str = "\x1b[97m";
 const BRIGHT_CYAN: &str = "\x1b[96;1m";
 const RESET_COLOR: &str = "\x1b[0m";
 
-impl<'s> Context<'s> {
-    pub fn new(source: &'s str) -> Self {
-        Self { source }
+impl<'a> Formatter<'a> {
+    pub fn new(source: &'a str, formatter: &'a mut fmt::Formatter<'a>) -> Self {
+        Self { source, formatter }
     }
 
-    pub fn source(&self) -> &'s str {
+    pub fn source(&self) -> &'a str {
         self.source
     }
 
-    pub fn error(
-        &mut self,
-        f: &mut fmt::Formatter<'_>,
-        args: fmt::Arguments<'_>,
-    ) -> fmt::Result {
-        writeln!(f, "{BRIGHT_RED}error{BRIGHT_WHITE}: {args}{RESET_COLOR}")
+    pub fn error(&mut self, args: fmt::Arguments<'_>) -> fmt::Result {
+        writeln!(
+            self.formatter,
+            "{BRIGHT_RED}error{BRIGHT_WHITE}: {args}{RESET_COLOR}"
+        )
     }
 
     pub fn span(
         &mut self,
         span: Span,
-        f: &mut fmt::Formatter<'_>,
         args: fmt::Arguments<'_>,
     ) -> fmt::Result {
         let start = Position::from_source(self.source, span.start());
@@ -73,14 +72,14 @@ impl<'s> Context<'s> {
             u32::max(start.line_number.ilog10(), end.line_number.ilog10()) + 1;
 
         writeln!(
-            f,
+            self.formatter,
             "{BRIGHT_CYAN}{:width$} |{RESET_COLOR}",
             "",
             width = width as usize,
         )?;
 
         writeln!(
-            f,
+            self.formatter,
             "{BRIGHT_CYAN}{:width$} |{RESET_COLOR}   {}",
             start.line_number,
             &self.source[start.line_start..start.line_end],
@@ -89,7 +88,7 @@ impl<'s> Context<'s> {
 
         if start.line_number == end.line_number {
             writeln!(
-                f,
+                self.formatter,
                 "{BRIGHT_CYAN}{:width$} |{RESET_COLOR}   \
                  {:column$}{BRIGHT_RED}{:^^length$} {args}{RESET_COLOR}",
                 "",
@@ -101,7 +100,7 @@ impl<'s> Context<'s> {
             )?;
         } else {
             writeln!(
-                f,
+                self.formatter,
                 "{BRIGHT_CYAN}{:width$} |{RESET_COLOR}  \
                  {BRIGHT_RED}_{:_^column$}^{RESET_COLOR}",
                 "",
@@ -110,7 +109,7 @@ impl<'s> Context<'s> {
                 column = start.column,
             )?;
             writeln!(
-                f,
+                self.formatter,
                 "{BRIGHT_CYAN}{:width$} |{RESET_COLOR} \
                  {BRIGHT_RED}|{RESET_COLOR} {}",
                 end.line_number,
@@ -118,7 +117,7 @@ impl<'s> Context<'s> {
                 width = width as usize,
             )?;
             writeln!(
-                f,
+                self.formatter,
                 "{:width$} {BRIGHT_CYAN}|{RESET_COLOR} \
                  {BRIGHT_RED}|_{:_^column$}^ {args}{RESET_COLOR}",
                 "",
@@ -133,9 +132,5 @@ impl<'s> Context<'s> {
 }
 
 pub trait Diagnostic {
-    fn fmt(
-        &self,
-        c: &mut Context<'_>,
-        f: &mut fmt::Formatter<'_>,
-    ) -> fmt::Result;
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result;
 }

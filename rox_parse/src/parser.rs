@@ -1,6 +1,6 @@
 use core::fmt;
 
-use rox_diag::{Context, Diagnostic, Span, Spanned as _};
+use rox_diag::{Diagnostic, Formatter, Span, Spanned as _};
 use rox_lex::{Token, TokenKind, token_kind::*};
 
 use crate::ast::{
@@ -26,87 +26,76 @@ pub enum ParseError {
 }
 
 impl Diagnostic for ParseError {
-    fn fmt(
-        &self,
-        c: &mut Context<'_>,
-        f: &mut fmt::Formatter<'_>,
-    ) -> fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::ExpectedExpression(span) => {
-                c.error(f, format_args!("unexpected token"))?;
-                c.span(
+                f.error(format_args!("unexpected token"))?;
+                f.span(
                     *span,
-                    f,
                     format_args!(
                         "expected expression, found '{}'",
-                        span.get(c.source())
+                        span.get(f.source())
                     ),
                 )?;
             }
             Self::UnterminatedGroup { start, end } => {
-                c.error(f, format_args!("unterminated group"))?;
-                c.span(
+                f.error(format_args!("unterminated group"))?;
+                f.span(
                     *start,
-                    f,
                     format_args!(
                         "the group started here is missing a closing ')'"
                     ),
                 )?;
-                c.span(
+                f.span(
                     *end,
-                    f,
                     format_args!(
                         "insert a ')' before '{}'",
-                        end.get(c.source())
+                        end.get(f.source())
                     ),
                 )?;
             }
             Self::UnterminatedStatement { stmt, next } => {
-                c.error(f, format_args!("unterminated statement"))?;
-                c.span(
+                f.error(format_args!("unterminated statement"))?;
+                f.span(
                     *stmt,
-                    f,
                     format_args!(
                         "this statement was followed by '{}' instead of ';'",
-                        next.get(c.source())
+                        next.get(f.source())
                     ),
                 )?;
             }
             Self::UnterminatedBlock { start, end } => {
-                c.error(f, format_args!("unterminated block"))?;
-                c.span(
+                f.error(format_args!("unterminated block"))?;
+                f.span(
                     *start,
-                    f,
                     format_args!(
                         "the block started here is missing a closing '}}'"
                     ),
                 )?;
-                c.span(
+                f.span(
                     *end,
-                    f,
                     format_args!(
                         "insert a '}}' before '{}'",
-                        end.get(c.source())
+                        end.get(f.source())
                     ),
                 )?;
             }
             Self::ExpectedIdent(span) => {
-                c.error(f, format_args!("expected identifier"))?;
-                c.span(*span, f, format_args!("expected an identifier here"))?;
+                f.error(format_args!("expected identifier"))?;
+                f.span(*span, format_args!("expected an identifier here"))?;
             }
             Self::ExpectedLeftParen(span) => {
-                c.error(f, format_args!("missing opening parenthesis"))?;
-                c.span(*span, f, format_args!("expected a '(' here"))?;
+                f.error(format_args!("missing opening parenthesis"))?;
+                f.span(*span, format_args!("expected a '(' here"))?;
             }
             Self::ExpectedLeftBrace(span) => {
-                c.error(f, format_args!("missing opening brace"))?;
-                c.span(*span, f, format_args!("expected a '{{' here"))?;
+                f.error(format_args!("missing opening brace"))?;
+                f.span(*span, format_args!("expected a '{{' here"))?;
             }
             Self::InvalidAssignmentTarget(span) => {
-                c.error(f, format_args!("invalid assignment target"))?;
-                c.span(
+                f.error(format_args!("invalid assignment target"))?;
+                f.span(
                     *span,
-                    f,
                     format_args!(
                         "this is the left-hand side of an assignment \
                          expression, but is not a place"
@@ -114,12 +103,12 @@ impl Diagnostic for ParseError {
                 )?;
             }
             Self::ExpectedSemicolon(span) => {
-                c.error(f, format_args!("missing semicolon"))?;
-                c.span(*span, f, format_args!("expected a ';' here"))?;
+                f.error(format_args!("missing semicolon"))?;
+                f.span(*span, format_args!("expected a ';' here"))?;
             }
             Self::ExpectedDot(span) => {
-                c.error(f, format_args!("missing dot"))?;
-                c.span(*span, f, format_args!("expected a '.' here"))?;
+                f.error(format_args!("missing dot"))?;
+                f.span(*span, format_args!("expected a '.' here"))?;
             }
         }
         Ok(())
