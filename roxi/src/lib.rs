@@ -1,9 +1,0 @@
-//! Rox language interpreter
-
-pub mod ast;
-pub mod compiler;
-pub mod diagnostic;
-pub mod interpreter;
-pub mod parser;
-pub mod scanner;
-pub mod span;

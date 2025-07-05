@@ -1,4 +1,5 @@
-mod scanner;
+mod error;
+mod lexer;
 mod token;
 
-pub use self::{scanner::*, token::*};
+pub use self::{error::*, lexer::*, token::*};

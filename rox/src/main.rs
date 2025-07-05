@@ -1,4 +1,4 @@
-use rox::{Chunk, Op, Value, VirtualMachine};
+use rox_vm::{Chunk, Op, Value, VirtualMachine};
 
 fn main() {
     let mut chunk = Chunk::new();

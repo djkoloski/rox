@@ -39,6 +39,8 @@ macro_rules! define_tokens {
                         this
                     }
                 }
+
+                define_tokens!(@impl_from_span $variant $($value)?);
             )*
         }
 
@@ -68,7 +70,15 @@ macro_rules! define_tokens {
                 }
             }
         }
-    }
+    };
+    (@impl_from_span $variant:ident) => {
+        impl From<::rox_diag::Span> for $variant {
+            fn from(span: ::rox_diag::Span) -> Self {
+                Self { span }
+            }
+        }
+    };
+    (@impl_from_span $variant:ident $($value:ty)?) => {};
 }
 
 define_tokens! {
@@ -92,7 +102,7 @@ define_tokens! {
         GreaterEqual,
         Less,
         LessEqual,
-        Identifier(std::string::String),
+        Ident(std::string::String),
         String(std::string::String),
         Number(f64),
         And,

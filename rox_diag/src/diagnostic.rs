@@ -11,11 +11,11 @@ struct Position {
 }
 
 impl Position {
-    fn from_source(text: &str, offset: usize) -> Self {
-        let mut matches = text[..offset].rmatch_indices('\n').fuse();
+    fn from_source(source: &str, offset: usize) -> Self {
+        let mut matches = source[..offset].rmatch_indices('\n').fuse();
 
-        let line_end =
-            offset + text[offset..].find('\n').unwrap_or(text.len() - offset);
+        let line_end = offset
+            + source[offset..].find('\n').unwrap_or(source.len() - offset);
         if let Some((pos, _)) = matches.next() {
             Self {
                 line_start: pos + 1,
@@ -39,9 +39,10 @@ pub struct Formatter<'a> {
     formatter: &'a mut fmt::Formatter<'a>,
 }
 
-const BRIGHT_RED: &str = "\x1b[31;1m";
+const BRIGHT_RED: &str = "\x1b[91m";
 const BRIGHT_WHITE: &str = "\x1b[97m";
-const BRIGHT_CYAN: &str = "\x1b[96;1m";
+const BRIGHT_CYAN: &str = "\x1b[96m";
+const BRIGHT_YELLOW: &str = "\x1b[93m";
 const RESET_COLOR: &str = "\x1b[0m";
 
 impl<'a> Formatter<'a> {
@@ -54,16 +55,58 @@ impl<'a> Formatter<'a> {
     }
 
     pub fn error(&mut self, args: fmt::Arguments<'_>) -> fmt::Result {
+        self.emit(args, "error", BRIGHT_RED)
+    }
+
+    pub fn warn(&mut self, args: fmt::Arguments<'_>) -> fmt::Result {
+        self.emit(args, "warning", BRIGHT_YELLOW)
+    }
+
+    pub fn help(&mut self, args: fmt::Arguments<'_>) -> fmt::Result {
+        self.emit(args, "help", BRIGHT_CYAN)
+    }
+
+    fn emit(
+        &mut self,
+        args: fmt::Arguments<'_>,
+        prefix: &str,
+        color: &str,
+    ) -> fmt::Result {
         writeln!(
             self.formatter,
-            "{BRIGHT_RED}error{BRIGHT_WHITE}: {args}{RESET_COLOR}"
+            "{color}{prefix}{BRIGHT_WHITE}: {args}{RESET_COLOR}"
         )
     }
 
-    pub fn span(
+    pub fn span_error(
         &mut self,
         span: Span,
         args: fmt::Arguments<'_>,
+    ) -> fmt::Result {
+        self.span_colored(span, args, BRIGHT_RED)
+    }
+
+    pub fn span_warn(
+        &mut self,
+        span: Span,
+        args: fmt::Arguments<'_>,
+    ) -> fmt::Result {
+        self.span_colored(span, args, BRIGHT_YELLOW)
+    }
+
+    pub fn span_help(
+        &mut self,
+        span: Span,
+        args: fmt::Arguments<'_>,
+    ) -> fmt::Result {
+        self.span_colored(span, args, BRIGHT_CYAN)
+    }
+
+    fn span_colored(
+        &mut self,
+        span: Span,
+        args: fmt::Arguments<'_>,
+        color: &str,
     ) -> fmt::Result {
         let start = Position::from_source(self.source, span.start());
         let end = Position::from_source(self.source, span.end());
@@ -90,7 +133,7 @@ impl<'a> Formatter<'a> {
             writeln!(
                 self.formatter,
                 "{BRIGHT_CYAN}{:width$} |{RESET_COLOR}   \
-                 {:column$}{BRIGHT_RED}{:^^length$} {args}{RESET_COLOR}",
+                 {:column$}{color}{:^^length$} {args}{RESET_COLOR}",
                 "",
                 "",
                 "",
@@ -102,7 +145,7 @@ impl<'a> Formatter<'a> {
             writeln!(
                 self.formatter,
                 "{BRIGHT_CYAN}{:width$} |{RESET_COLOR}  \
-                 {BRIGHT_RED}_{:_^column$}^{RESET_COLOR}",
+                 {color}_{:_^column$}^{RESET_COLOR}",
                 "",
                 "",
                 width = width as usize,
@@ -110,16 +153,16 @@ impl<'a> Formatter<'a> {
             )?;
             writeln!(
                 self.formatter,
-                "{BRIGHT_CYAN}{:width$} |{RESET_COLOR} \
-                 {BRIGHT_RED}|{RESET_COLOR} {}",
+                "{BRIGHT_CYAN}{:width$} |{RESET_COLOR} {color}|{RESET_COLOR} \
+                 {}",
                 end.line_number,
                 &self.source[end.line_start..end.line_end],
                 width = width as usize,
             )?;
             writeln!(
                 self.formatter,
-                "{:width$} {BRIGHT_CYAN}|{RESET_COLOR} \
-                 {BRIGHT_RED}|_{:_^column$}^ {args}{RESET_COLOR}",
+                "{:width$} {BRIGHT_CYAN}|{RESET_COLOR} {color}|_{:_^column$}^ \
+                 {args}{RESET_COLOR}",
                 "",
                 "",
                 width = width as usize,

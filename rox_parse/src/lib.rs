@@ -1,4 +1,5 @@
 pub mod ast;
+mod error;
 mod parser;
 
-pub use self::parser::*;
+pub use self::{error::*, parser::*};

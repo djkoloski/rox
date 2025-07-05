@@ -5,7 +5,7 @@ pub struct Span {
 }
 
 impl Span {
-    pub fn scan(start: usize, end: usize) -> Self {
+    pub fn new(start: usize, end: usize) -> Self {
         debug_assert!(start <= end);
 
         Self { start, end }
@@ -26,8 +26,8 @@ impl Span {
         self.end
     }
 
-    pub fn get<'t>(&self, text: &'t str) -> &'t str {
-        &text[self.start..self.end]
+    pub fn get<'t>(&self, source: &'t str) -> &'t str {
+        &source[self.start..self.end]
     }
 }
 
@@ -36,7 +36,7 @@ pub trait Spanned {
     fn span_end(&self) -> usize;
 
     fn span(&self) -> Span {
-        Span::scan(self.span_start(), self.span_end())
+        Span::new(self.span_start(), self.span_end())
     }
 }
 

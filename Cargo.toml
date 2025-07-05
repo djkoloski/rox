@@ -1,15 +1,17 @@
 [workspace]
 members = [
     "rox",
+    "rox_compile",
     "rox_diag",
     "rox_lex",
     "rox_parse",
-    # Old version of interpreter
-    "roxi",
+    "rox_vm",
 ]
 resolver = "3"
 
 [workspace.dependencies]
+rox_compile = { path = "rox_compile" }
 rox_diag = { path = "rox_diag" }
 rox_lex = { path = "rox_lex" }
 rox_parse = { path = "rox_parse" }
+rox_vm = { path = "rox_vm" }

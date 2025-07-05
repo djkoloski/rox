@@ -1,69 +1,15 @@
-use core::{fmt, num::ParseFloatError};
+use rox_diag::Span;
 
-use rox_diag::{Diagnostic, Formatter, Span};
+use crate::{LexError, Token, token_kind::*};
 
-use crate::{Token, token_kind::*};
-
-#[derive(Debug)]
-pub enum ScanError {
-    UnexpectedCharacter { span: Span, char: u8 },
-    UnterminatedBlockComment(Span),
-    UnterminatedString(Span),
-    InvalidNumber { span: Span, error: ParseFloatError },
-}
-
-impl Diagnostic for ScanError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::UnexpectedCharacter { span, char } => {
-                f.error(format_args!("unexpected character"))?;
-                f.span(
-                    *span,
-                    format_args!(
-                        "'{}' (0x{char:x}) is not valid syntax",
-                        *char as char
-                    ),
-                )?;
-            }
-            Self::UnterminatedBlockComment(span) => {
-                f.error(format_args!("unterminated block comment"))?;
-                f.span(
-                    *span,
-                    format_args!(
-                        "this block comment is missing a closing tag (*/)"
-                    ),
-                )?;
-            }
-            Self::UnterminatedString(span) => {
-                f.error(format_args!("unterminated string"))?;
-                f.span(
-                    *span,
-                    format_args!("this string is missing a closing quote (\")"),
-                )?;
-            }
-            Self::InvalidNumber { span, error } => {
-                f.error(format_args!("invalid number"))?;
-                f.span(
-                    *span,
-                    format_args!(
-                        "failed to parse '{}' as a number: {error}",
-                        span.get(f.source())
-                    ),
-                )?;
-            }
-        }
-        Ok(())
-    }
-}
-
-pub struct Scanner<'a> {
+pub struct Lexer<'a> {
     source: &'a str,
     start: usize,
     current: usize,
-    pub errors: Vec<ScanError>,
+    pub errors: Vec<LexError>,
 }
 
-impl<'a> Scanner<'a> {
+impl<'a> Lexer<'a> {
     pub fn new(source: &'a str) -> Self {
         Self {
             source,
@@ -73,7 +19,7 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    pub fn scan_tokens(&mut self) -> Vec<Token> {
+    pub fn lex_tokens(&mut self) -> Vec<Token> {
         let mut result = Vec::new();
 
         loop {
@@ -82,54 +28,54 @@ impl<'a> Scanner<'a> {
                 break;
             };
 
-            if let Some(token) = self.scan_token(c) {
+            if let Some(token) = self.lex_token(c) {
                 result.push(token);
             }
         }
 
-        result.push(Eof { span: self.span() }.into());
+        result.push(self.token::<Eof>());
 
         result
     }
 
-    fn scan_token(&mut self, c: u8) -> Option<Token> {
+    fn lex_token(&mut self, c: u8) -> Option<Token> {
         Some(match c {
-            b'(' => LeftParen { span: self.span() }.into(),
-            b')' => RightParen { span: self.span() }.into(),
-            b'{' => LeftBrace { span: self.span() }.into(),
-            b'}' => RightBrace { span: self.span() }.into(),
-            b',' => Comma { span: self.span() }.into(),
-            b'.' => Dot { span: self.span() }.into(),
-            b'-' => Minus { span: self.span() }.into(),
-            b'+' => Plus { span: self.span() }.into(),
-            b';' => Semicolon { span: self.span() }.into(),
-            b'*' => Star { span: self.span() }.into(),
+            b'(' => self.token::<LeftParen>(),
+            b')' => self.token::<RightParen>(),
+            b'{' => self.token::<LeftBrace>(),
+            b'}' => self.token::<RightBrace>(),
+            b',' => self.token::<Comma>(),
+            b'.' => self.token::<Dot>(),
+            b'-' => self.token::<Minus>(),
+            b'+' => self.token::<Plus>(),
+            b';' => self.token::<Semicolon>(),
+            b'*' => self.token::<Star>(),
             b'!' => {
                 if self.expect(b'=') {
-                    BangEqual { span: self.span() }.into()
+                    self.token::<BangEqual>()
                 } else {
-                    Bang { span: self.span() }.into()
+                    self.token::<Bang>()
                 }
             }
             b'=' => {
                 if self.expect(b'=') {
-                    EqualEqual { span: self.span() }.into()
+                    self.token::<EqualEqual>()
                 } else {
-                    Equal { span: self.span() }.into()
+                    self.token::<Equal>()
                 }
             }
             b'<' => {
                 if self.expect(b'=') {
-                    LessEqual { span: self.span() }.into()
+                    self.token::<LessEqual>()
                 } else {
-                    Less { span: self.span() }.into()
+                    self.token::<Less>()
                 }
             }
             b'>' => {
                 if self.expect(b'=') {
-                    GreaterEqual { span: self.span() }.into()
+                    self.token::<GreaterEqual>()
                 } else {
-                    Greater { span: self.span() }.into()
+                    self.token::<Greater>()
                 }
             }
             b'/' => match self.peek()? {
@@ -141,7 +87,7 @@ impl<'a> Scanner<'a> {
                     self.block_comment();
                     return None;
                 }
-                _ => Slash { span: self.span() }.into(),
+                _ => self.token::<Slash>(),
             },
             b'"' => self.string()?,
             b'0'..=b'9' => self.number()?,
@@ -149,7 +95,7 @@ impl<'a> Scanner<'a> {
             // Whitespace
             b' ' | b'\r' | b'\t' | b'\n' => return None,
             char => {
-                self.error(ScanError::UnexpectedCharacter {
+                self.error(LexError::UnexpectedCharacter {
                     span: self.span(),
                     char,
                 });
@@ -192,7 +138,7 @@ impl<'a> Scanner<'a> {
             }
         }
 
-        self.error(ScanError::UnterminatedBlockComment(self.span()));
+        self.error(LexError::UnterminatedBlockComment { span: self.span() });
     }
 
     fn string(&mut self) -> Option<Token> {
@@ -210,7 +156,7 @@ impl<'a> Scanner<'a> {
             }
         }
 
-        self.error(ScanError::UnterminatedString(self.span()));
+        self.error(LexError::UnterminatedString { span: self.span() });
         None
     }
 
@@ -244,7 +190,7 @@ impl<'a> Scanner<'a> {
                     self.current,
                     &self.source[self.start..self.current]
                 );
-                self.error(ScanError::InvalidNumber {
+                self.error(LexError::InvalidNumber {
                     span: self.span(),
                     error,
                 });
@@ -261,23 +207,23 @@ impl<'a> Scanner<'a> {
         }
 
         match &self.source[self.start..self.current] {
-            "and" => And { span: self.span() }.into(),
-            "class" => Class { span: self.span() }.into(),
-            "else" => Else { span: self.span() }.into(),
-            "false" => False { span: self.span() }.into(),
-            "for" => For { span: self.span() }.into(),
-            "fun" => Fun { span: self.span() }.into(),
-            "if" => If { span: self.span() }.into(),
-            "nil" => Nil { span: self.span() }.into(),
-            "or" => Or { span: self.span() }.into(),
-            "print" => Print { span: self.span() }.into(),
-            "return" => Return { span: self.span() }.into(),
-            "super" => Super { span: self.span() }.into(),
-            "this" => This { span: self.span() }.into(),
-            "true" => True { span: self.span() }.into(),
-            "var" => Var { span: self.span() }.into(),
-            "while" => While { span: self.span() }.into(),
-            ident => Identifier {
+            "and" => self.token::<And>(),
+            "class" => self.token::<Class>(),
+            "else" => self.token::<Else>(),
+            "false" => self.token::<False>(),
+            "for" => self.token::<For>(),
+            "fun" => self.token::<Fun>(),
+            "if" => self.token::<If>(),
+            "nil" => self.token::<Nil>(),
+            "or" => self.token::<Or>(),
+            "print" => self.token::<Print>(),
+            "return" => self.token::<Return>(),
+            "super" => self.token::<Super>(),
+            "this" => self.token::<This>(),
+            "true" => self.token::<True>(),
+            "var" => self.token::<Var>(),
+            "while" => self.token::<While>(),
+            ident => Ident {
                 span: self.span(),
                 value: ident.to_string(),
             }
@@ -310,10 +256,18 @@ impl<'a> Scanner<'a> {
     }
 
     fn span(&self) -> Span {
-        Span::scan(self.start, self.current)
+        Span::new(self.start, self.current)
     }
 
-    fn error(&mut self, e: ScanError) {
+    fn token<T>(&self) -> Token
+    where
+        T: From<Span>,
+        Token: From<T>,
+    {
+        T::from(self.span()).into()
+    }
+
+    fn error(&mut self, e: LexError) {
         self.errors.push(e);
     }
 }
