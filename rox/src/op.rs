@@ -107,5 +107,10 @@ define_ops! {
             #[codec(U24)]
             constant: u32,
         },
+        Negate,
+        Add,
+        Subtract,
+        Multiply,
+        Divide,
     }
 }
