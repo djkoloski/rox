@@ -45,8 +45,8 @@ ast_node! {
 
     #[token]
     pub enum Literal {
-        Number(Number),
-        String(String),
+        Number(FloatLiteral),
+        String(StringLiteral),
         True(True),
         False(False),
         Nil(Nil),
@@ -101,13 +101,13 @@ ast_node! {
     #[visit(VisitExpr, ExprVisitor::visit_variable_expr)]
     pub struct VariableExpr {
         pub decoration: Decoration,
-        pub ident: Ident,
+        pub ident: Identifier,
     }
 
     #[visit(VisitExpr, ExprVisitor::visit_assign_expr)]
     pub struct AssignExpr {
         pub decoration: Decoration,
-        pub ident: Ident,
+        pub ident: Identifier,
         pub equal: Equal,
         pub expr: Box<Expr>,
     }
@@ -124,14 +124,14 @@ ast_node! {
     pub struct GetExpr {
         pub instance: Box<Expr>,
         pub dot: Dot,
-        pub name: Ident,
+        pub name: Identifier,
     }
 
     #[visit(VisitExpr, ExprVisitor::visit_set_expr)]
     pub struct SetExpr {
         pub instance: Box<Expr>,
         pub dot: Dot,
-        pub name: Ident,
+        pub name: Identifier,
         pub equal: Equal,
         pub expr: Box<Expr>,
     }
@@ -147,6 +147,6 @@ ast_node! {
         pub decoration: Decoration,
         pub super_: Super,
         pub dot: Dot,
-        pub name: Ident,
+        pub name: Identifier,
     }
 }

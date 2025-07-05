@@ -25,25 +25,25 @@ macro_rules! ast_node {
     (
         #[token]
         pub enum $name:ident {
-            $($variant:ident($ty:ty)),*
+            $($variant:ident($token:ident)),*
             $(,)?
         }
         $($rest:tt)*
     ) => {
-        ast_node!(@enum $name { $($variant($ty),)* });
+        ast_node!(@enum $name { $($variant($token),)* });
 
         impl ::rox_lex::TokenKind for $name {
             fn matches_token(token: &::rox_lex::Token) -> bool {
                 ::core::matches!(
                     token,
-                    $(::rox_lex::Token::$variant(_))|*,
+                    $(::rox_lex::Token::$token(_))|*,
                 )
             }
 
             fn from_token(token: ::rox_lex::Token) -> Self {
                 match token {
                     $(
-                        ::rox_lex::Token::$variant(value) =>
+                        ::rox_lex::Token::$token(value) =>
                             Self::$variant(value),
                     )*
                     _ => ::core::unreachable!(),

@@ -147,7 +147,7 @@ impl<'a> Lexer<'a> {
                 let value =
                     self.source[self.start + 1..self.current - 1].to_string();
                 return Some(
-                    String {
+                    StringLiteral {
                         span: self.span(),
                         value,
                     }
@@ -177,7 +177,7 @@ impl<'a> Lexer<'a> {
 
         match self.source[self.start..self.current].parse::<f64>() {
             Ok(value) => Some(
-                Number {
+                FloatLiteral {
                     span: self.span(),
                     value,
                 }
@@ -223,7 +223,7 @@ impl<'a> Lexer<'a> {
             "true" => self.token::<True>(),
             "var" => self.token::<Var>(),
             "while" => self.token::<While>(),
-            ident => Ident {
+            ident => Identifier {
                 span: self.span(),
                 value: ident.to_string(),
             }

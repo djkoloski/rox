@@ -631,15 +631,15 @@ impl<'a> Parser<'a> {
 
     fn primary(&mut self) -> Option<Expr> {
         match self.peek() {
-            Token::Number(_)
-            | Token::String(_)
+            Token::FloatLiteral(_)
+            | Token::StringLiteral(_)
             | Token::True(_)
             | Token::False(_)
             | Token::Nil(_) => Some(Expr::Literal(LiteralExpr {
                 literal: self.expect(),
             })),
             Token::LeftParen(_) => self.grouped().map(Expr::Grouping),
-            Token::Ident(_) => Some(Expr::Variable(VariableExpr {
+            Token::Identifier(_) => Some(Expr::Variable(VariableExpr {
                 decoration: self.decorator.decorate(),
                 ident: self.expect(),
             })),

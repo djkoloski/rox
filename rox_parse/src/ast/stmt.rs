@@ -52,7 +52,7 @@ ast_node! {
     #[visit(VisitStmt, StmtVisitor::visit_var_decl_stmt)]
     pub struct VarDeclStmt {
         pub var: Var,
-        pub ident: Ident,
+        pub ident: Identifier,
         pub assignment: Option<(Equal, Expr)>,
         pub semi: Semicolon,
     }
@@ -67,7 +67,7 @@ ast_node! {
     pub struct ClassDeclStmt {
         pub decoration: Decoration,
         pub class: Class,
-        pub name: Ident,
+        pub name: Identifier,
         pub inheritance: Option<Inheritance>,
         pub lbrace: LeftBrace,
         pub methods: Vec<Function>,
@@ -77,14 +77,14 @@ ast_node! {
     pub struct Inheritance {
         pub decoration: Decoration,
         pub less: Less,
-        pub superclass: Ident,
+        pub superclass: Identifier,
     }
 
     pub struct Function {
         pub decoration: Decoration,
-        pub name: Ident,
+        pub name: Identifier,
         pub lparen: LeftParen,
-        pub params: Punctuated<Ident, Comma>,
+        pub params: Punctuated<Identifier, Comma>,
         pub rparen: RightParen,
         pub body: BlockStmt,
     }
