@@ -7,8 +7,23 @@ name = "rox"
 version = "0.1.0"
 
 [[package]]
-name = "roxc"
+name = "rox_diag"
 version = "0.1.0"
+
+[[package]]
+name = "rox_lex"
+version = "0.1.0"
+dependencies = [
+ "rox_diag",
+]
+
+[[package]]
+name = "rox_parse"
+version = "0.1.0"
+dependencies = [
+ "rox_diag",
+ "rox_lex",
+]
 
 [[package]]
 name = "roxi"

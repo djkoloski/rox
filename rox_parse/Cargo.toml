@@ -1,0 +1,8 @@
+[package]
+name = "rox_parse"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rox_diag.workspace = true
+rox_lex.workspace = true

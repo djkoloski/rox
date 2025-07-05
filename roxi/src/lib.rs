@@ -1,7 +1,5 @@
 //! Rox language interpreter
 
-#![deny(unsafe_op_in_unsafe_fn)]
-
 pub mod ast;
 pub mod compiler;
 pub mod diagnostic;
