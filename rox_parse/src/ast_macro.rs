@@ -1,7 +1,13 @@
 macro_rules! ast {
     ($($tt:tt)*) => {
-        pub trait Visitor {
+        pub mod visit {
+            use super::*;
+
             define_visitor_fns! { $($tt)* }
+        }
+
+        pub trait Visitor {
+            define_visitor_trait_fns! { $($tt)* }
         }
 
         impl_visits! { $($tt)* }
@@ -17,8 +23,8 @@ macro_rules! define_visitor_fns {
         $($rest:tt)*
     ) => {
         #[allow(unused_variables)]
-        fn $fn(&mut self, node: &$name) {
-            visit_fields! { node self => $($tt)* }
+        pub fn $fn<V: Visitor + ?Sized>(visitor: &mut V, node: &$name) {
+            visit_fields! { node visitor => $($tt)* }
         }
 
         define_visitor_fns! { $($rest)* }
@@ -36,6 +42,36 @@ macro_rules! define_visitor_fns {
     ) => {
         // Skip unnamed enums
         define_visitor_fns! { $($rest)* }
+    };
+    () => {};
+}
+
+macro_rules! define_visitor_trait_fns {
+    (
+        #[accept = $fn:ident]
+        pub struct $name:ident { $($tt:tt)* }
+        $($rest:tt)*
+    ) => {
+        #[allow(unused_variables)]
+        fn $fn(&mut self, node: &$name) {
+            visit::$fn(self, node);
+        }
+
+        define_visitor_trait_fns! { $($rest)* }
+    };
+    (
+        pub struct $name:ident { $($tt:tt)* }
+        $($rest:tt)*
+    ) => {
+        // Skip unnamed structs
+        define_visitor_trait_fns! { $($rest)* }
+    };
+    (
+        pub enum $name:ident { $($tt:tt)* }
+        $($rest:tt)*
+    ) => {
+        // Skip unnamed enums
+        define_visitor_trait_fns! { $($rest)* }
     };
     () => {};
 }
@@ -319,6 +355,7 @@ pub(crate) use ast;
 pub(crate) use define_enum;
 pub(crate) use define_nodes;
 pub(crate) use define_visitor_fns;
+pub(crate) use define_visitor_trait_fns;
 pub(crate) use impl_visits;
 pub(crate) use struct_span_end;
 pub(crate) use struct_span_start;

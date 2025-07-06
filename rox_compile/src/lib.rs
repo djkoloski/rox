@@ -3,7 +3,7 @@ mod error;
 use rox_diag::Spanned;
 use rox_parse::{
     Visit as _,
-    ast::{Literal, LiteralExpr, Program, ReturnStmt, Visitor},
+    ast::{Literal, LiteralExpr, Program, ReturnStmt, Visitor, visit},
 };
 use rox_vm::{Chunk, Op, Value};
 
@@ -40,6 +40,8 @@ impl<'a> CompilePass<'a> {
 
 impl Visitor for CompilePass<'_> {
     fn visit_literal_expr(&mut self, node: &LiteralExpr) {
+        visit::visit_literal_expr(self, node);
+
         match &node.literal {
             Literal::Number(n) => {
                 let constant = self.chunk.add_constant(Value::Float(n.value));
@@ -50,7 +52,8 @@ impl Visitor for CompilePass<'_> {
     }
 
     fn visit_return_stmt(&mut self, node: &ReturnStmt) {
-        node.expr.accept(self);
+        visit::visit_return_stmt(self, node);
+
         self.chunk.encode(Op::Return, node.span());
     }
 }
