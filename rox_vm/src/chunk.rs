@@ -25,6 +25,10 @@ impl Chunk {
         &self.constants
     }
 
+    pub fn span(&self, offset: usize) -> Span {
+        self.spans[offset]
+    }
+
     pub fn encode(&mut self, op: Op, span: Span) {
         op.encode(&mut self.bytes);
         self.spans.extend(span, self.bytes.len() - self.spans.len());
@@ -69,7 +73,7 @@ impl Chunk {
         if *offset > 0 && span == self.spans[*offset - 1] {
             print!("   | ");
         } else {
-            print!("{:>4} ", span.start());
+            print!("{}..{} ", span.start(), span.end());
         }
 
         let op = Op::decode(self.bytes(), offset).unwrap();

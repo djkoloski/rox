@@ -1,8 +1,32 @@
 use core::fmt;
 
-use rox_diag::{Diagnostic, Formatter};
+use rox_diag::{Diagnostic, Formatter, Span};
 
-use crate::DecodeError;
+use crate::{DecodeError, Value};
+
+#[derive(Debug)]
+pub struct RuntimeDiagnostic {
+    error: RuntimeError,
+    span: Span,
+}
+
+impl RuntimeDiagnostic {
+    pub fn new(error: RuntimeError, span: Span) -> Self {
+        Self { error, span }
+    }
+}
+
+impl Diagnostic for RuntimeDiagnostic {
+    fn fmt(&self, f: &mut Formatter<'_, '_>) -> fmt::Result {
+        f.error(format_args!("{}", self.error))?;
+        f.span_error(
+            self.span,
+            format_args!("while executing this operation"),
+        )?;
+
+        Ok(())
+    }
+}
 
 #[derive(Debug)]
 pub enum RuntimeError {
@@ -11,6 +35,8 @@ pub enum RuntimeError {
     BytecodeOutOfBounds,
     ConstantOutOfBounds,
     Decode(DecodeError),
+    ExpectedFloat(Value),
+    ExpectedBoolean(Value),
 }
 
 impl From<DecodeError> for RuntimeError {
@@ -19,18 +45,20 @@ impl From<DecodeError> for RuntimeError {
     }
 }
 
-impl Diagnostic for RuntimeError {
-    fn fmt(&self, f: &mut Formatter<'_, '_>) -> fmt::Result {
+impl fmt::Display for RuntimeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::StackOverflow => f.error(format_args!("stack overflow"))?,
-            Self::StackUnderflow => f.error(format_args!("stack underflow"))?,
-            Self::BytecodeOutOfBounds => {
-                f.error(format_args!("bytecode out of bounds"))?
+            Self::StackOverflow => write!(f, "stack overflow")?,
+            Self::StackUnderflow => write!(f, "stack underflow")?,
+            Self::BytecodeOutOfBounds => write!(f, "bytecode out of bounds")?,
+            Self::ConstantOutOfBounds => write!(f, "constant out of bounds")?,
+            Self::Decode(e) => write!(f, "decode error: {e}")?,
+            Self::ExpectedFloat(actual) => {
+                write!(f, "expected float, got {actual}")?
             }
-            Self::ConstantOutOfBounds => {
-                f.error(format_args!("constant out of bounds"))?
+            Self::ExpectedBoolean(actual) => {
+                write!(f, "expected boolean, got {actual}")?
             }
-            Self::Decode(e) => f.error(format_args!("decode error: {e}"))?,
         }
 
         Ok(())

@@ -4,7 +4,7 @@ use crate::{Punctuated, ast_macro::*};
 
 token_group! {
     pub enum Literal {
-        Number(FloatLiteral),
+        Float(FloatLiteral),
         String(StringLiteral),
         True(True),
         False(False),
@@ -12,8 +12,8 @@ token_group! {
     }
 
     pub enum UnaryOperator {
-        Bang(Bang),
-        Minus(Minus),
+        Not(Bang),
+        Negate(Minus),
     }
 
     pub enum BinaryOperator {
@@ -23,12 +23,12 @@ token_group! {
         GreaterEqual(GreaterEqual),
         Less(Less),
         LessEqual(LessEqual),
-        BangEqual(BangEqual),
-        EqualEqual(EqualEqual),
-        Minus(Minus),
-        Plus(Plus),
-        Slash(Slash),
-        Star(Star),
+        NotEqual(BangEqual),
+        Equal(EqualEqual),
+        Subtract(Minus),
+        Add(Plus),
+        Divide(Slash),
+        Multiply(Star),
     }
 }
 
