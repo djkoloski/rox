@@ -2,28 +2,26 @@ use rox_diag::{Span, Spanned as _};
 use rox_lex::{Token, TokenKind, token_kind::*};
 
 use crate::{
-    ParseError,
+    ParseError, Punctuated,
     ast::{
-        AssignExpr, BinaryExpr, BinaryOperator, BlockStmt, CallExpr,
-        ClassDeclStmt, Decorator, Expr, ExprStmt, FunDeclStmt, Function,
-        GetExpr, GroupingExpr, IfStmt, Inheritance, Literal, LiteralExpr,
-        PrintStmt, Program, Punctuated, Repl, ReturnStmt, SetExpr, Stmt,
+        AssignExpr, Assignment, BinaryExpr, BinaryOperator, BlockStmt,
+        CallExpr, ClassDeclStmt, ElseClause, Expr, ExprStmt, FunDeclStmt,
+        Function, GetExpr, GroupingExpr, IfStmt, Inheritance, Literal,
+        LiteralExpr, PrintStmt, Program, Repl, ReturnStmt, SetExpr, Stmt,
         SuperExpr, ThisExpr, UnaryExpr, VarDeclStmt, VariableExpr, WhileStmt,
     },
 };
 
-pub struct Parser<'a> {
+pub struct Parser {
     tokens: Vec<Token>,
-    decorator: &'a mut Decorator,
     pub errors: Vec<ParseError>,
 }
 
-impl<'a> Parser<'a> {
-    pub fn new(decorator: &'a mut Decorator, mut tokens: Vec<Token>) -> Self {
+impl Parser {
+    pub fn new(mut tokens: Vec<Token>) -> Self {
         tokens.reverse();
         Self {
             tokens,
-            decorator,
             errors: Vec::new(),
         }
     }
@@ -104,13 +102,13 @@ impl<'a> Parser<'a> {
 
         let assignment = if let Some(equal) = self.try_next() {
             let expr = self.expression()?;
-            Some((equal, expr))
+            Some(Assignment { equal, expr })
         } else {
             None
         };
 
         let Some(semi) = self.try_next() else {
-            let stmt = if let Some((_, expr)) = &assignment {
+            let stmt = if let Some(Assignment { expr, .. }) = &assignment {
                 Span::across(&var, expr)
             } else {
                 Span::across(&var, &ident)
@@ -153,11 +151,7 @@ impl<'a> Parser<'a> {
                     .push(ParseError::ExpectedIdent(self.peek().span()));
                 return None;
             };
-            inheritance = Some(Inheritance {
-                decoration: self.decorator.decorate(),
-                less,
-                superclass,
-            });
+            inheritance = Some(Inheritance { less, superclass });
         }
 
         let Some(lbrace) = self.try_next::<LeftBrace>() else {
@@ -180,7 +174,6 @@ impl<'a> Parser<'a> {
         };
 
         Some(ClassDeclStmt {
-            decoration: self.decorator.decorate(),
             class,
             name,
             inheritance,
@@ -230,7 +223,6 @@ impl<'a> Parser<'a> {
         let body = self.block_stmt()?;
 
         Some(Function {
-            decoration: self.decorator.decorate(),
             name,
             lparen,
             params,
@@ -257,16 +249,19 @@ impl<'a> Parser<'a> {
         let group = self.grouped()?;
         let then = self.statement()?;
 
-        let mut else_ = None;
-        if let Some(else_token) = self.try_next() {
-            else_ = Some((else_token, Box::new(self.statement()?)));
+        let mut else_clause = None;
+        if let Some(else_) = self.try_next() {
+            else_clause = Some(ElseClause {
+                else_,
+                stmt: Box::new(self.statement()?),
+            });
         }
 
         Some(IfStmt {
             if_,
-            group,
-            then: Box::new(then),
-            else_,
+            condition: group,
+            stmt: Box::new(then),
+            else_clause,
         })
     }
 
@@ -473,9 +468,8 @@ impl<'a> Parser<'a> {
                     equal,
                     expr: Box::new(value),
                 })),
-                Expr::Variable(VariableExpr { decoration, ident }) => {
+                Expr::Variable(VariableExpr { ident }) => {
                     Some(Expr::Assign(AssignExpr {
-                        decoration,
                         ident,
                         equal,
                         expr: Box::new(value),
@@ -640,11 +634,9 @@ impl<'a> Parser<'a> {
             })),
             Token::LeftParen(_) => self.grouped().map(Expr::Grouping),
             Token::Identifier(_) => Some(Expr::Variable(VariableExpr {
-                decoration: self.decorator.decorate(),
                 ident: self.expect(),
             })),
             Token::This(_) => Some(Expr::This(ThisExpr {
-                decoration: self.decorator.decorate(),
                 this: self.expect(),
             })),
             Token::Super(_) => {
@@ -659,12 +651,7 @@ impl<'a> Parser<'a> {
                         .push(ParseError::ExpectedIdent(self.peek().span()));
                     return None;
                 };
-                Some(Expr::Super(SuperExpr {
-                    decoration: self.decorator.decorate(),
-                    super_,
-                    dot,
-                    name,
-                }))
+                Some(Expr::Super(SuperExpr { super_, dot, name }))
             }
             _ => {
                 self.errors
