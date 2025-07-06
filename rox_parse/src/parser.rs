@@ -14,9 +14,14 @@ use crate::{
     },
 };
 
+pub struct ParseOutput<T> {
+    pub ast: Option<T>,
+    pub errors: Vec<ParseError>,
+}
+
 pub struct Parser {
     tokens: VecDeque<Token>,
-    pub errors: Vec<ParseError>,
+    errors: Vec<ParseError>,
 }
 
 impl Parser {
@@ -27,39 +32,47 @@ impl Parser {
         }
     }
 
-    pub fn parse(&mut self) -> Option<Program> {
-        self.program()
+    pub fn parse(mut self) -> ParseOutput<Program> {
+        let ast = self.program();
+        ParseOutput {
+            ast,
+            errors: self.errors,
+        }
     }
 
-    pub fn parse_repl(&mut self) -> Option<Repl> {
-        self.repl()
+    pub fn parse_repl(mut self) -> ParseOutput<Repl> {
+        let ast = self.repl();
+        ParseOutput {
+            ast,
+            errors: self.errors,
+        }
     }
 
     fn peek(&self) -> &Token {
         self.tokens.front().unwrap()
     }
 
-    fn try_next<T: TokenKind>(&mut self) -> Option<T> {
+    fn advance(&mut self) -> Token {
+        self.tokens.pop_front().unwrap()
+    }
+
+    fn expect<T: TokenKind>(&mut self) -> Option<T> {
         if T::matches_token(self.peek()) {
-            Some(T::from_token(self.next()))
+            Some(T::from_token(self.advance()))
         } else {
             None
         }
     }
 
-    fn expect<T: TokenKind>(&mut self) -> T {
-        T::from_token(self.next())
-    }
-
-    fn next(&mut self) -> Token {
-        self.tokens.pop_front().unwrap()
+    fn assume<T: TokenKind>(&mut self) -> T {
+        T::from_token(self.advance())
     }
 
     fn program(&mut self) -> Option<Program> {
         let mut stmts = Vec::new();
 
         loop {
-            if let Some(eof) = self.try_next() {
+            if let Some(eof) = self.expect() {
                 break Some(Program { stmts, eof });
             } else if let Some(stmt) = self.declaration() {
                 stmts.push(stmt);
@@ -94,21 +107,21 @@ impl Parser {
     }
 
     fn var_decl_stmt(&mut self) -> Option<VarDeclStmt> {
-        let var = self.try_next::<Var>()?;
-        let Some(ident) = self.try_next() else {
+        let var = self.expect::<Var>()?;
+        let Some(ident) = self.expect() else {
             self.errors
                 .push(ParseError::ExpectedIdent(self.peek().span()));
             return None;
         };
 
-        let assignment = if let Some(equal) = self.try_next() {
+        let assignment = if let Some(equal) = self.expect() {
             let expr = self.expression()?;
             Some(Assignment { equal, expr })
         } else {
             None
         };
 
-        let Some(semi) = self.try_next() else {
+        let Some(semi) = self.expect() else {
             let stmt = if let Some(Assignment { expr, .. }) = &assignment {
                 Span::across(&var, expr)
             } else {
@@ -131,23 +144,23 @@ impl Parser {
     }
 
     fn fun_decl_stmt(&mut self) -> Option<FunDeclStmt> {
-        let fun = self.try_next()?;
+        let fun = self.expect()?;
         let function = self.function()?;
 
         Some(FunDeclStmt { fun, function })
     }
 
     fn class_decl_stmt(&mut self) -> Option<ClassDeclStmt> {
-        let class = self.try_next()?;
-        let Some(name) = self.try_next() else {
+        let class = self.expect()?;
+        let Some(name) = self.expect() else {
             self.errors
                 .push(ParseError::ExpectedIdent(self.peek().span()));
             return None;
         };
 
         let mut inheritance = None;
-        if let Some(less) = self.try_next() {
-            let Some(superclass) = self.try_next() else {
+        if let Some(less) = self.expect() {
+            let Some(superclass) = self.expect() else {
                 self.errors
                     .push(ParseError::ExpectedIdent(self.peek().span()));
                 return None;
@@ -155,7 +168,7 @@ impl Parser {
             inheritance = Some(Inheritance { less, superclass });
         }
 
-        let Some(lbrace) = self.try_next::<LeftBrace>() else {
+        let Some(lbrace) = self.expect::<LeftBrace>() else {
             self.errors
                 .push(ParseError::ExpectedLeftBrace(self.peek().span()));
             return None;
@@ -166,7 +179,7 @@ impl Parser {
             methods.push(self.function()?);
         }
 
-        let Some(rbrace) = self.try_next() else {
+        let Some(rbrace) = self.expect() else {
             self.errors.push(ParseError::UnterminatedBlock {
                 start: lbrace.span(),
                 end: self.peek().span(),
@@ -185,13 +198,13 @@ impl Parser {
     }
 
     fn function(&mut self) -> Option<Function> {
-        let Some(name) = self.try_next() else {
+        let Some(name) = self.expect() else {
             self.errors
                 .push(ParseError::ExpectedIdent(self.peek().span()));
             return None;
         };
 
-        let Some(lparen) = self.try_next::<LeftParen>() else {
+        let Some(lparen) = self.expect::<LeftParen>() else {
             self.errors
                 .push(ParseError::ExpectedLeftParen(self.peek().span()));
             return None;
@@ -199,20 +212,20 @@ impl Parser {
 
         let mut params = Punctuated::new();
         while !matches!(self.peek(), Token::RightParen(_)) {
-            let Some(ident) = self.try_next() else {
+            let Some(ident) = self.expect() else {
                 self.errors
                     .push(ParseError::ExpectedIdent(self.peek().span()));
                 return None;
             };
             params.push(ident);
-            if let Some(comma) = self.try_next() {
+            if let Some(comma) = self.expect() {
                 params.push_punct(comma);
             } else {
                 break;
             }
         }
 
-        let Some(rparen) = self.try_next() else {
+        let Some(rparen) = self.expect() else {
             self.errors.push(ParseError::UnterminatedGroup {
                 start: lparen.span(),
                 end: self.peek().span(),
@@ -245,13 +258,13 @@ impl Parser {
     }
 
     fn if_stmt(&mut self) -> Option<IfStmt> {
-        let if_ = self.try_next()?;
+        let if_ = self.expect()?;
 
         let group = self.grouped()?;
         let then = self.statement()?;
 
         let mut else_clause = None;
-        if let Some(else_) = self.try_next() {
+        if let Some(else_) = self.expect() {
             else_clause = Some(ElseClause {
                 else_,
                 stmt: Box::new(self.statement()?),
@@ -267,9 +280,9 @@ impl Parser {
     }
 
     fn print_stmt(&mut self) -> Option<PrintStmt> {
-        let print = self.try_next()?;
+        let print = self.expect()?;
         let expr = self.expression()?;
-        let Some(semi) = self.try_next() else {
+        let Some(semi) = self.expect() else {
             self.errors.push(ParseError::UnterminatedStatement {
                 stmt: Span::across(&print, &expr),
                 next: self.peek().span(),
@@ -281,14 +294,14 @@ impl Parser {
     }
 
     fn while_stmt(&mut self) -> Option<WhileStmt> {
-        let while_ = self.try_next()?;
-        let Some(lparen) = self.try_next::<LeftParen>() else {
+        let while_ = self.expect()?;
+        let Some(lparen) = self.expect::<LeftParen>() else {
             self.errors
                 .push(ParseError::ExpectedLeftParen(self.peek().span()));
             return None;
         };
         let expr = self.expression()?;
-        let Some(rparen) = self.try_next() else {
+        let Some(rparen) = self.expect() else {
             self.errors.push(ParseError::UnterminatedGroup {
                 start: lparen.span(),
                 end: self.peek().span(),
@@ -307,8 +320,8 @@ impl Parser {
     }
 
     fn for_stmt(&mut self) -> Option<Stmt> {
-        let for_ = self.try_next::<For>()?;
-        let Some(lparen) = self.try_next::<LeftParen>() else {
+        let for_ = self.expect::<For>()?;
+        let Some(lparen) = self.expect::<LeftParen>() else {
             self.errors
                 .push(ParseError::ExpectedLeftParen(self.peek().span()));
             return None;
@@ -316,7 +329,7 @@ impl Parser {
 
         let initializer = match self.peek() {
             Token::Semicolon(_) => {
-                self.next();
+                self.advance();
                 None
             }
             Token::Var(_) => Some(self.var_decl_stmt()?.into()),
@@ -329,7 +342,7 @@ impl Parser {
             }),
             _ => {
                 let expr = self.expression()?;
-                let Some(_) = self.try_next::<Semicolon>() else {
+                let Some(_) = self.expect::<Semicolon>() else {
                     self.errors.push(ParseError::ExpectedSemicolon(
                         self.peek().span(),
                     ));
@@ -344,7 +357,7 @@ impl Parser {
             _ => Some(self.expression()?),
         };
 
-        let Some(rparen) = self.try_next() else {
+        let Some(rparen) = self.expect() else {
             self.errors.push(ParseError::UnterminatedGroup {
                 start: lparen.span(),
                 end: self.peek().span(),
@@ -390,12 +403,12 @@ impl Parser {
     }
 
     fn return_stmt(&mut self) -> Option<ReturnStmt> {
-        let return_ = self.try_next()?;
+        let return_ = self.expect()?;
         let mut expr = None;
         if !matches!(self.peek(), Token::Semicolon(_)) {
             expr = Some(self.expression()?);
         }
-        let Some(semi) = self.try_next() else {
+        let Some(semi) = self.expect() else {
             self.errors
                 .push(ParseError::ExpectedSemicolon(self.peek().span()));
             return None;
@@ -408,7 +421,7 @@ impl Parser {
     }
 
     fn block_stmt(&mut self) -> Option<BlockStmt> {
-        let lbrace = self.try_next::<LeftBrace>()?;
+        let lbrace = self.expect::<LeftBrace>()?;
         let mut stmts = Vec::new();
 
         loop {
@@ -425,7 +438,7 @@ impl Parser {
             }
         }
 
-        let rbrace = self.try_next()?;
+        let rbrace = self.expect()?;
 
         Some(BlockStmt {
             lbrace,
@@ -436,7 +449,7 @@ impl Parser {
 
     fn expr_stmt(&mut self) -> Option<ExprStmt> {
         let expr = self.expression()?;
-        let Some(semi) = self.try_next() else {
+        let Some(semi) = self.expect() else {
             self.errors.push(ParseError::UnterminatedStatement {
                 stmt: expr.span(),
                 next: self.peek().span(),
@@ -454,7 +467,7 @@ impl Parser {
     fn assignment(&mut self) -> Option<Expr> {
         let expr = self.logic_or()?;
 
-        if let Some(equal) = self.try_next() {
+        if let Some(equal) = self.expect() {
             let value = self.assignment()?;
 
             match expr {
@@ -489,7 +502,7 @@ impl Parser {
 
     fn logic_or(&mut self) -> Option<Expr> {
         let mut expr = self.logic_and()?;
-        while let Some(or) = self.try_next() {
+        while let Some(or) = self.expect() {
             let rhs = self.logic_and()?;
             expr = Expr::Binary(BinaryExpr {
                 left: Box::new(expr),
@@ -502,7 +515,7 @@ impl Parser {
 
     fn logic_and(&mut self) -> Option<Expr> {
         let mut expr = self.equality()?;
-        while let Some(and) = self.try_next() {
+        while let Some(and) = self.expect() {
             let rhs = self.equality()?;
             expr = Expr::Binary(BinaryExpr {
                 left: Box::new(expr),
@@ -517,7 +530,7 @@ impl Parser {
         self.parse_left_binary(
             |this| match this.peek() {
                 Token::BangEqual(_) | Token::EqualEqual(_) => {
-                    Some(this.expect())
+                    Some(this.assume())
                 }
                 _ => None,
             },
@@ -531,7 +544,7 @@ impl Parser {
                 Token::Greater(_)
                 | Token::GreaterEqual(_)
                 | Token::Less(_)
-                | Token::LessEqual(_) => Some(this.expect()),
+                | Token::LessEqual(_) => Some(this.assume()),
                 _ => None,
             },
             |this| this.term(),
@@ -541,7 +554,7 @@ impl Parser {
     fn term(&mut self) -> Option<Expr> {
         self.parse_left_binary(
             |this| match this.peek() {
-                Token::Minus(_) | Token::Plus(_) => Some(this.expect()),
+                Token::Minus(_) | Token::Plus(_) => Some(this.assume()),
                 _ => None,
             },
             |this| this.factor(),
@@ -551,7 +564,7 @@ impl Parser {
     fn factor(&mut self) -> Option<Expr> {
         self.parse_left_binary(
             |this| match this.peek() {
-                Token::Slash(_) | Token::Star(_) => Some(this.expect()),
+                Token::Slash(_) | Token::Star(_) => Some(this.assume()),
                 _ => None,
             },
             |this| this.unary(),
@@ -559,7 +572,7 @@ impl Parser {
     }
 
     fn unary(&mut self) -> Option<Expr> {
-        if let Some(operator) = self.try_next() {
+        if let Some(operator) = self.expect() {
             Some(Expr::Unary(UnaryExpr {
                 operator,
                 inner: Box::new(self.unary()?),
@@ -575,18 +588,18 @@ impl Parser {
         loop {
             match self.peek() {
                 Token::LeftParen(_) => {
-                    let lparen = self.expect::<LeftParen>();
+                    let lparen = self.assume::<LeftParen>();
                     let mut arguments = Punctuated::new();
                     while !matches!(self.peek(), Token::RightParen(_)) {
                         arguments.push(self.expression()?);
-                        if let Some(comma) = self.try_next() {
+                        if let Some(comma) = self.expect() {
                             arguments.push_punct(comma);
                         } else {
                             break;
                         }
                     }
 
-                    let Some(rparen) = self.try_next() else {
+                    let Some(rparen) = self.expect() else {
                         self.errors.push(ParseError::UnterminatedGroup {
                             start: lparen.span(),
                             end: self.peek().span(),
@@ -603,8 +616,8 @@ impl Parser {
                     });
                 }
                 Token::Dot(_) => {
-                    let dot = self.expect::<Dot>();
-                    let Some(name) = self.try_next() else {
+                    let dot = self.assume::<Dot>();
+                    let Some(name) = self.expect() else {
                         self.errors.push(ParseError::ExpectedIdent(
                             self.peek().span(),
                         ));
@@ -631,23 +644,23 @@ impl Parser {
             | Token::True(_)
             | Token::False(_)
             | Token::Nil(_) => Some(Expr::Literal(LiteralExpr {
-                literal: self.expect(),
+                literal: self.assume(),
             })),
             Token::LeftParen(_) => self.grouped().map(Expr::Grouping),
             Token::Identifier(_) => Some(Expr::Variable(VariableExpr {
-                ident: self.expect(),
+                ident: self.assume(),
             })),
             Token::This(_) => Some(Expr::This(ThisExpr {
-                this: self.expect(),
+                this: self.assume(),
             })),
             Token::Super(_) => {
-                let super_ = self.expect();
-                let Some(dot) = self.try_next() else {
+                let super_ = self.assume();
+                let Some(dot) = self.expect() else {
                     self.errors
                         .push(ParseError::ExpectedDot(self.peek().span()));
                     return None;
                 };
-                let Some(name) = self.try_next() else {
+                let Some(name) = self.expect() else {
                     self.errors
                         .push(ParseError::ExpectedIdent(self.peek().span()));
                     return None;
@@ -663,7 +676,7 @@ impl Parser {
     }
 
     fn grouped(&mut self) -> Option<GroupingExpr> {
-        let Some(lparen) = self.try_next() else {
+        let Some(lparen) = self.expect() else {
             self.errors
                 .push(ParseError::ExpectedLeftParen(self.peek().span()));
             return None;
@@ -678,7 +691,7 @@ impl Parser {
             Token::RightParen(_) => Some(GroupingExpr {
                 lparen,
                 inner: Box::new(inner),
-                rparen: self.expect(),
+                rparen: self.assume(),
             }),
             _ => {
                 self.errors.push(ParseError::UnterminatedGroup {
@@ -695,7 +708,7 @@ impl Parser {
 
     fn synchronize<T: TokenKind>(&mut self) {
         while !matches!(self.peek(), Token::Eof(_)) {
-            if T::matches_token(&self.next()) {
+            if T::matches_token(&self.advance()) {
                 break;
             }
         }
