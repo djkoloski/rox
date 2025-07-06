@@ -17,7 +17,7 @@ pub enum ParseError {
 }
 
 impl Diagnostic for ParseError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_, '_>) -> fmt::Result {
         match self {
             Self::ExpectedExpression(span) => {
                 f.error(format_args!("unexpected token"))?;

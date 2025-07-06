@@ -1,19 +1,4 @@
-use crate::{Chunk, Codec, DecodeError, Op, Value};
-
-#[derive(Debug)]
-pub enum RuntimeError {
-    StackOverflow,
-    StackUnderflow,
-    BytecodeOutOfBounds,
-    ConstantOutOfBounds,
-    Decode(DecodeError),
-}
-
-impl From<DecodeError> for RuntimeError {
-    fn from(value: DecodeError) -> Self {
-        Self::Decode(value)
-    }
-}
+use crate::{Chunk, Codec, Op, RuntimeError, Value};
 
 const MAX_STACK_LEN: usize = 255;
 
@@ -32,7 +17,7 @@ impl<'chunk> VirtualMachine<'chunk> {
         }
     }
 
-    pub fn interpret(&mut self) -> Result<(), RuntimeError> {
+    pub fn execute(&mut self) -> Result<(), RuntimeError> {
         loop {
             #[cfg(feature = "trace")]
             self.trace();

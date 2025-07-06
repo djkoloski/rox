@@ -11,7 +11,7 @@ pub enum LexError {
 }
 
 impl Diagnostic for LexError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_, '_>) -> fmt::Result {
         match self {
             Self::UnexpectedCharacter { span, char } => {
                 f.error(format_args!("unexpected character"))?;

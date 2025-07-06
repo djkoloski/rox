@@ -34,9 +34,9 @@ impl Position {
     }
 }
 
-pub struct Formatter<'a> {
+pub struct Formatter<'a, 'f> {
     source: &'a str,
-    formatter: &'a mut fmt::Formatter<'a>,
+    formatter: &'a mut fmt::Formatter<'f>,
 }
 
 const BRIGHT_RED: &str = "\x1b[91m";
@@ -45,8 +45,8 @@ const BRIGHT_CYAN: &str = "\x1b[96m";
 const BRIGHT_YELLOW: &str = "\x1b[93m";
 const RESET_COLOR: &str = "\x1b[0m";
 
-impl<'a> Formatter<'a> {
-    pub fn new(source: &'a str, formatter: &'a mut fmt::Formatter<'a>) -> Self {
+impl<'a, 'f> Formatter<'a, 'f> {
+    pub fn new(source: &'a str, formatter: &'a mut fmt::Formatter<'f>) -> Self {
         Self { source, formatter }
     }
 
@@ -175,5 +175,5 @@ impl<'a> Formatter<'a> {
 }
 
 pub trait Diagnostic {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result;
+    fn fmt(&self, f: &mut Formatter<'_, '_>) -> fmt::Result;
 }

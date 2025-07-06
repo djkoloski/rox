@@ -9,13 +9,13 @@ use crate::{
         AssignExpr, Assignment, BinaryExpr, BinaryOperator, BlockStmt,
         CallExpr, ClassDeclStmt, ElseClause, Expr, ExprStmt, FunDeclStmt,
         Function, GetExpr, GroupingExpr, IfStmt, Inheritance, Literal,
-        LiteralExpr, PrintStmt, Program, Repl, ReturnStmt, SetExpr, Stmt,
-        SuperExpr, ThisExpr, UnaryExpr, VarDeclStmt, VariableExpr, WhileStmt,
+        LiteralExpr, PrintStmt, Program, ReturnStmt, SetExpr, Stmt, SuperExpr,
+        ThisExpr, UnaryExpr, VarDeclStmt, VariableExpr, WhileStmt,
     },
 };
 
-pub struct ParseOutput<T> {
-    pub ast: Option<T>,
+pub struct ParseOutput {
+    pub ast: Option<Program>,
     pub errors: Vec<ParseError>,
 }
 
@@ -32,7 +32,7 @@ impl Parser {
         }
     }
 
-    pub fn parse(mut self) -> ParseOutput<Program> {
+    pub fn parse(mut self) -> ParseOutput {
         let ast = self.program();
         ParseOutput {
             ast,
@@ -40,7 +40,7 @@ impl Parser {
         }
     }
 
-    pub fn parse_repl(mut self) -> ParseOutput<Repl> {
+    pub fn parse_repl(mut self) -> ParseOutput {
         let ast = self.repl();
         ParseOutput {
             ast,
@@ -82,8 +82,8 @@ impl Parser {
         }
     }
 
-    fn repl(&mut self) -> Option<Repl> {
-        match self.peek() {
+    fn repl(&mut self) -> Option<Program> {
+        let stmt = match self.peek() {
             Token::Var(_)
             | Token::Fun(_)
             | Token::Class(_)
@@ -92,9 +92,24 @@ impl Parser {
             | Token::While(_)
             | Token::For(_)
             | Token::Return(_)
-            | Token::LeftBrace(_) => Some(Repl::Stmt(self.declaration()?)),
-            _ => Some(Repl::Expr(self.expression()?)),
-        }
+            | Token::LeftBrace(_) => self.declaration()?,
+            _ => Stmt::Return(ReturnStmt {
+                return_: Return {
+                    span: Span::new(0, 0),
+                },
+                expr: Some(self.expression()?),
+                semi: Semicolon {
+                    span: Span::new(0, 0),
+                },
+            }),
+        };
+
+        Some(Program {
+            stmts: vec![stmt],
+            eof: Eof {
+                span: Span::new(0, 0),
+            },
+        })
     }
 
     fn declaration(&mut self) -> Option<Stmt> {

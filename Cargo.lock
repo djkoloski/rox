@@ -6,6 +6,10 @@ version = 4
 name = "rox"
 version = "0.1.0"
 dependencies = [
+ "rox_compile",
+ "rox_diag",
+ "rox_lex",
+ "rox_parse",
  "rox_vm",
 ]
 
@@ -16,6 +20,7 @@ dependencies = [
  "rox_diag",
  "rox_lex",
  "rox_parse",
+ "rox_vm",
 ]
 
 [[package]]
@@ -40,3 +45,6 @@ dependencies = [
 [[package]]
 name = "rox_vm"
 version = "0.1.0"
+dependencies = [
+ "rox_diag",
+]

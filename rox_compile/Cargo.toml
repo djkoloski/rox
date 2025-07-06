@@ -7,3 +7,4 @@ edition = "2024"
 rox_diag.workspace = true
 rox_lex.workspace = true
 rox_parse.workspace = true
+rox_vm.workspace = true

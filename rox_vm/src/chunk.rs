@@ -1,8 +1,10 @@
+use rox_diag::Span;
+
 use crate::{Codec as _, Op, Value, rle::Rle};
 
 pub struct Chunk {
     bytes: Vec<u8>,
-    lines: Rle<usize>,
+    spans: Rle<Span>,
     constants: Vec<Value>,
 }
 
@@ -10,7 +12,7 @@ impl Chunk {
     pub fn new() -> Self {
         Self {
             bytes: Vec::new(),
-            lines: Rle::new(),
+            spans: Rle::new(),
             constants: Vec::new(),
         }
     }
@@ -23,25 +25,25 @@ impl Chunk {
         &self.constants
     }
 
-    pub fn encode(&mut self, op: Op, line: usize) {
+    pub fn encode(&mut self, op: Op, span: Span) {
         op.encode(&mut self.bytes);
-        self.lines.extend(line, self.bytes.len() - self.lines.len());
+        self.spans.extend(span, self.bytes.len() - self.spans.len());
     }
 
-    pub fn encode_constant(&mut self, constant: usize, line: usize) {
+    pub fn encode_constant(&mut self, constant: usize, span: Span) {
         if constant <= u8::MAX as usize {
             self.encode(
                 Op::Constant {
                     constant: constant as u8,
                 },
-                line,
+                span,
             );
         } else {
             self.encode(
                 Op::ConstantLong {
                     constant: constant as u32,
                 },
-                line,
+                span,
             );
         }
     }
@@ -63,11 +65,11 @@ impl Chunk {
     pub fn disassemble_instruction(&self, offset: &mut usize) {
         print!("{offset:0>4x} ");
 
-        let line = self.lines[*offset];
-        if *offset > 0 && line == self.lines[*offset - 1] {
+        let span = self.spans[*offset];
+        if *offset > 0 && span == self.spans[*offset - 1] {
             print!("   | ");
         } else {
-            print!("{line:>4} ");
+            print!("{:>4} ", span.start());
         }
 
         let op = Op::decode(self.bytes(), offset).unwrap();

@@ -259,9 +259,4 @@ ast! {
         pub stmts: Vec<Stmt>,
         pub eof: Eof,
     }
-
-    pub enum Repl {
-        Stmt(Stmt),
-        Expr(Expr),
-    }
 }
