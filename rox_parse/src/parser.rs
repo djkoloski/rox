@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use rox_diag::{Span, Spanned as _};
 use rox_lex::{Token, TokenKind, token_kind::*};
 
@@ -13,15 +15,14 @@ use crate::{
 };
 
 pub struct Parser {
-    tokens: Vec<Token>,
+    tokens: VecDeque<Token>,
     pub errors: Vec<ParseError>,
 }
 
 impl Parser {
-    pub fn new(mut tokens: Vec<Token>) -> Self {
-        tokens.reverse();
+    pub fn new(tokens: Vec<Token>) -> Self {
         Self {
-            tokens,
+            tokens: VecDeque::from(tokens),
             errors: Vec::new(),
         }
     }
@@ -35,7 +36,7 @@ impl Parser {
     }
 
     fn peek(&self) -> &Token {
-        self.tokens.last().unwrap()
+        self.tokens.front().unwrap()
     }
 
     fn try_next<T: TokenKind>(&mut self) -> Option<T> {
@@ -51,7 +52,7 @@ impl Parser {
     }
 
     fn next(&mut self) -> Token {
-        self.tokens.pop().unwrap()
+        self.tokens.pop_front().unwrap()
     }
 
     fn program(&mut self) -> Option<Program> {
@@ -73,12 +74,12 @@ impl Parser {
             Token::Var(_)
             | Token::Fun(_)
             | Token::Class(_)
-            | Token::Print(_)
-            | Token::LeftBrace(_)
             | Token::If(_)
+            | Token::Print(_)
             | Token::While(_)
             | Token::For(_)
-            | Token::Return(_) => Some(Repl::Stmt(self.declaration()?)),
+            | Token::Return(_)
+            | Token::LeftBrace(_) => Some(Repl::Stmt(self.declaration()?)),
             _ => Some(Repl::Expr(self.expression()?)),
         }
     }
