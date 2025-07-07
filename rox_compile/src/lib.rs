@@ -8,7 +8,7 @@ use rox_parse::{
         UnaryExpr, UnaryOperator, Visitor, visit,
     },
 };
-use rox_vm::{Chunk, Op, Value};
+use rox_vm::{Chunk, Constant, Op};
 
 use self::error::CompileError;
 
@@ -46,11 +46,11 @@ impl Visitor for CompilePass<'_> {
         visit::visit_literal_expr(self, node);
 
         let value = match &node.literal {
-            Literal::Float(n) => Value::Float(n.value),
-            Literal::False(_) => Value::Boolean(false),
-            Literal::True(_) => Value::Boolean(true),
-            Literal::Nil(_) => Value::Nil,
-            Literal::String(_) => todo!(),
+            Literal::Float(n) => Constant::Float(n.value),
+            Literal::False(_) => Constant::Boolean(false),
+            Literal::True(_) => Constant::Boolean(true),
+            Literal::Nil(_) => Constant::Nil,
+            Literal::String(s) => Constant::String(s.value.clone()),
         };
         let constant = self.chunk.add_constant(value);
         self.chunk.encode_constant(constant, node.span());

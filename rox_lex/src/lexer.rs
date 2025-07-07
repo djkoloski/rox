@@ -150,6 +150,7 @@ impl<'a> Lexer<'a> {
                     }
                     .into(),
                 );
+                return;
             }
         }
 

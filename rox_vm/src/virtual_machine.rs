@@ -1,4 +1,6 @@
-use crate::{Chunk, Codec, Op, RuntimeDiagnostic, RuntimeError, Value};
+use crate::{
+    Chunk, Codec, Constant, Op, RuntimeDiagnostic, RuntimeError, Value,
+};
 
 const MAX_STACK_LEN: usize = 255;
 
@@ -39,18 +41,43 @@ impl<'chunk> VirtualMachine<'chunk> {
                     println!("{}", self.pop()?);
                     break;
                 }
-                Op::Constant { constant } => {
-                    self.push(*self.get_constant(constant as usize)?)?;
+                Op::Constant { index } => {
+                    let constant = self.get_constant(index as usize)?;
+                    self.push(Value::from_constant(constant))?;
                 }
-                Op::ConstantLong { constant } => {
-                    self.push(*self.get_constant(constant as usize)?)?;
+                Op::ConstantLong { index } => {
+                    let constant = self.get_constant(index as usize)?;
+                    self.push(Value::from_constant(constant))?;
                 }
                 Op::Not => {
                     let target = self.pop()?;
                     self.push(Value::Boolean(!target.truthiness()))?;
                 }
                 Op::Negate => self.unary_float(|n| -n)?,
-                Op::Add => self.binary_float(|a, b| a + b)?,
+                Op::Add => {
+                    let rhs = self.pop()?;
+                    let lhs = self.pop()?;
+                    let result = match (lhs, rhs) {
+                        (Value::Float(lhs), Value::Float(rhs)) => {
+                            Value::Float(lhs + rhs)
+                        }
+                        (Value::String(lhs), Value::String(rhs)) => {
+                            Value::String(format!("{lhs}{rhs}"))
+                        }
+                        (Value::Float(_), rhs) => {
+                            return Err(RuntimeError::ExpectedFloat(rhs));
+                        }
+                        (Value::String(_), rhs) => {
+                            return Err(RuntimeError::ExpectedString(rhs));
+                        }
+                        (lhs, _) => {
+                            return Err(RuntimeError::ExpectedFloatOrString(
+                                lhs,
+                            ));
+                        }
+                    };
+                    self.push(result)?;
+                }
                 Op::Subtract => self.binary_float(|a, b| a - b)?,
                 Op::Multiply => self.binary_float(|a, b| a * b)?,
                 Op::Divide => self.binary_float(|a, b| a / b)?,
@@ -94,7 +121,7 @@ impl<'chunk> VirtualMachine<'chunk> {
     fn get_constant(
         &self,
         constant: usize,
-    ) -> Result<&'chunk Value, RuntimeError> {
+    ) -> Result<&'chunk Constant, RuntimeError> {
         self.chunk
             .constants()
             .get(constant)

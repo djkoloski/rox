@@ -34,9 +34,12 @@ pub enum RuntimeError {
     StackUnderflow,
     BytecodeOutOfBounds,
     ConstantOutOfBounds,
+    ObjectOutOfBounds,
     Decode(DecodeError),
     ExpectedFloat(Value),
     ExpectedBoolean(Value),
+    ExpectedString(Value),
+    ExpectedFloatOrString(Value),
 }
 
 impl From<DecodeError> for RuntimeError {
@@ -52,12 +55,19 @@ impl fmt::Display for RuntimeError {
             Self::StackUnderflow => write!(f, "stack underflow")?,
             Self::BytecodeOutOfBounds => write!(f, "bytecode out of bounds")?,
             Self::ConstantOutOfBounds => write!(f, "constant out of bounds")?,
+            Self::ObjectOutOfBounds => write!(f, "object out of bounds")?,
             Self::Decode(e) => write!(f, "decode error: {e}")?,
             Self::ExpectedFloat(actual) => {
                 write!(f, "expected float, got {actual}")?
             }
             Self::ExpectedBoolean(actual) => {
                 write!(f, "expected boolean, got {actual}")?
+            }
+            Self::ExpectedString(actual) => {
+                write!(f, "expected string, got {actual}")?
+            }
+            Self::ExpectedFloatOrString(actual) => {
+                write!(f, "expected float or string, got {actual}")?
             }
         }
 

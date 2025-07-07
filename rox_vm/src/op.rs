@@ -101,11 +101,11 @@ define_ops! {
     pub enum Op {
         Return,
         Constant {
-            constant: u8,
+            index: u8,
         },
         ConstantLong {
             #[codec(U24)]
-            constant: u32,
+            index: u32,
         },
         Not,
         Negate,

@@ -1,11 +1,11 @@
 use rox_diag::Span;
 
-use crate::{Codec as _, Op, Value, rle::Rle};
+use crate::{Codec as _, Constant, Op, rle::Rle};
 
 pub struct Chunk {
     bytes: Vec<u8>,
     spans: Rle<Span>,
-    constants: Vec<Value>,
+    constants: Vec<Constant>,
 }
 
 impl Chunk {
@@ -21,7 +21,7 @@ impl Chunk {
         &self.bytes
     }
 
-    pub fn constants(&self) -> &[Value] {
+    pub fn constants(&self) -> &[Constant] {
         &self.constants
     }
 
@@ -34,27 +34,22 @@ impl Chunk {
         self.spans.extend(span, self.bytes.len() - self.spans.len());
     }
 
-    pub fn encode_constant(&mut self, constant: usize, span: Span) {
-        if constant <= u8::MAX as usize {
-            self.encode(
-                Op::Constant {
-                    constant: constant as u8,
-                },
-                span,
-            );
+    pub fn encode_constant(&mut self, index: usize, span: Span) {
+        if index <= u8::MAX as usize {
+            self.encode(Op::Constant { index: index as u8 }, span);
         } else {
             self.encode(
                 Op::ConstantLong {
-                    constant: constant as u32,
+                    index: index as u32,
                 },
                 span,
             );
         }
     }
 
-    pub fn add_constant(&mut self, value: Value) -> usize {
+    pub fn add_constant(&mut self, constant: Constant) -> usize {
         let result = self.constants.len();
-        self.constants.push(value);
+        self.constants.push(constant);
         result
     }
 
@@ -80,20 +75,16 @@ impl Chunk {
         print!("{op:16}");
 
         match &op {
-            Op::Constant { constant } => {
-                self.debug_constant(*constant as usize)
-            }
-            Op::ConstantLong { constant } => {
-                self.debug_constant(*constant as usize)
-            }
+            Op::Constant { index } => self.debug_constant(*index as usize),
+            Op::ConstantLong { index } => self.debug_constant(*index as usize),
             _ => (),
         }
 
         println!();
     }
 
-    fn debug_constant(&self, constant: usize) {
-        let value = &self.constants[constant];
+    fn debug_constant(&self, index: usize) {
+        let value = &self.constants[index];
         print!(" '{value}'");
     }
 }

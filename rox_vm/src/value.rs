@@ -2,17 +2,46 @@ use core::fmt;
 
 use crate::RuntimeError;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
+pub enum Constant {
+    Float(f64),
+    Boolean(bool),
+    Nil,
+    String(String),
+}
+
+impl fmt::Display for Constant {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Float(value) => write!(f, "{value}"),
+            Self::Boolean(value) => write!(f, "{value}"),
+            Self::Nil => write!(f, "<nil>"),
+            Self::String(value) => write!(f, "{value}"),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Float(f64),
     Boolean(bool),
     Nil,
+    String(String),
 }
 
 impl Value {
+    pub fn from_constant(constant: &Constant) -> Self {
+        match constant {
+            Constant::Float(value) => Self::Float(*value),
+            Constant::Boolean(value) => Self::Boolean(*value),
+            Constant::Nil => Self::Nil,
+            Constant::String(value) => Self::String(value.clone()),
+        }
+    }
+
     pub fn truthiness(&self) -> bool {
         match self {
-            Self::Float(_) => true,
+            Self::Float(_) | Self::String(_) => true,
             Self::Boolean(b) => *b,
             Self::Nil => false,
         }
@@ -39,6 +68,7 @@ impl fmt::Display for Value {
             Self::Float(value) => write!(f, "{value}"),
             Self::Boolean(value) => write!(f, "{value}"),
             Self::Nil => write!(f, "<nil>"),
+            Self::String(value) => write!(f, "{value}"),
         }
     }
 }
