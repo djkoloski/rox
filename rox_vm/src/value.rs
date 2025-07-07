@@ -26,19 +26,10 @@ pub enum Value {
     Float(f64),
     Boolean(bool),
     Nil,
-    String(String),
+    String(usize),
 }
 
 impl Value {
-    pub fn from_constant(constant: &Constant) -> Self {
-        match constant {
-            Constant::Float(value) => Self::Float(*value),
-            Constant::Boolean(value) => Self::Boolean(*value),
-            Constant::Nil => Self::Nil,
-            Constant::String(value) => Self::String(value.clone()),
-        }
-    }
-
     pub fn truthiness(&self) -> bool {
         match self {
             Self::Float(_) | Self::String(_) => true,
@@ -68,7 +59,7 @@ impl fmt::Display for Value {
             Self::Float(value) => write!(f, "{value}"),
             Self::Boolean(value) => write!(f, "{value}"),
             Self::Nil => write!(f, "<nil>"),
-            Self::String(value) => write!(f, "{value}"),
+            Self::String(value) => write!(f, "<string {value}>"),
         }
     }
 }

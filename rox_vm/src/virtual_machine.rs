@@ -1,3 +1,7 @@
+use core::hash::BuildHasher;
+
+use hashbrown::{DefaultHashBuilder, HashTable};
+
 use crate::{
     Chunk, Codec, Constant, Op, RuntimeDiagnostic, RuntimeError, Value,
 };
@@ -9,6 +13,9 @@ pub struct VirtualMachine<'chunk> {
     last_ip: usize,
     ip: usize,
     stack: Vec<Value>,
+    hasher: DefaultHashBuilder,
+    string_index: HashTable<usize>,
+    strings: Vec<String>,
 }
 
 impl<'chunk> VirtualMachine<'chunk> {
@@ -18,6 +25,38 @@ impl<'chunk> VirtualMachine<'chunk> {
             last_ip: 0,
             ip: 0,
             stack: Vec::new(),
+            hasher: DefaultHashBuilder::default(),
+            string_index: HashTable::new(),
+            strings: Vec::new(),
+        }
+    }
+
+    fn reify_constant(&mut self, index: usize) -> Value {
+        match &self.chunk.constants()[index] {
+            Constant::Float(f) => Value::Float(*f),
+            Constant::Boolean(b) => Value::Boolean(*b),
+            Constant::Nil => Value::Nil,
+            Constant::String(s) => Value::String(self.intern_string(s)),
+        }
+    }
+
+    fn intern_string<S: AsRef<str> + Into<String>>(&mut self, s: S) -> usize {
+        use hashbrown::hash_table::Entry;
+
+        let hash = self.hasher.hash_one(s.as_ref());
+        let entry = self.string_index.entry(
+            hash,
+            |&i| self.strings[i] == s.as_ref(),
+            |&i| self.hasher.hash_one(&self.strings[i]),
+        );
+        match entry {
+            Entry::Occupied(occupied) => *occupied.get(),
+            Entry::Vacant(vacant) => {
+                let result = self.strings.len();
+                vacant.insert(result);
+                self.strings.push(s.into());
+                result
+            }
         }
     }
 
@@ -42,12 +81,12 @@ impl<'chunk> VirtualMachine<'chunk> {
                     break;
                 }
                 Op::Constant { index } => {
-                    let constant = self.get_constant(index as usize)?;
-                    self.push(Value::from_constant(constant))?;
+                    let value = self.reify_constant(index as usize);
+                    self.push(value)?;
                 }
                 Op::ConstantLong { index } => {
-                    let constant = self.get_constant(index as usize)?;
-                    self.push(Value::from_constant(constant))?;
+                    let value = self.reify_constant(index as usize);
+                    self.push(value)?;
                 }
                 Op::Not => {
                     let target = self.pop()?;
@@ -62,7 +101,9 @@ impl<'chunk> VirtualMachine<'chunk> {
                             Value::Float(lhs + rhs)
                         }
                         (Value::String(lhs), Value::String(rhs)) => {
-                            Value::String(format!("{lhs}{rhs}"))
+                            Value::String(
+                                self.intern_string(format!("{lhs}{rhs}")),
+                            )
                         }
                         (Value::Float(_), rhs) => {
                             return Err(RuntimeError::ExpectedFloat(rhs));
@@ -116,16 +157,6 @@ impl<'chunk> VirtualMachine<'chunk> {
     fn read_op(&mut self) -> Result<Op, RuntimeError> {
         self.last_ip = self.ip;
         Ok(Op::decode(self.chunk.bytes(), &mut self.ip)?)
-    }
-
-    fn get_constant(
-        &self,
-        constant: usize,
-    ) -> Result<&'chunk Constant, RuntimeError> {
-        self.chunk
-            .constants()
-            .get(constant)
-            .ok_or(RuntimeError::ConstantOutOfBounds)
     }
 
     fn push(&mut self, value: Value) -> Result<(), RuntimeError> {
