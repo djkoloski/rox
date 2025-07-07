@@ -52,14 +52,3 @@ impl Value {
         }
     }
 }
-
-impl fmt::Display for Value {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Float(value) => write!(f, "{value}"),
-            Self::Boolean(value) => write!(f, "{value}"),
-            Self::Nil => write!(f, "<nil>"),
-            Self::String(value) => write!(f, "<string {value}>"),
-        }
-    }
-}

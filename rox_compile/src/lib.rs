@@ -4,8 +4,8 @@ use rox_diag::Spanned;
 use rox_parse::{
     Visit as _,
     ast::{
-        BinaryExpr, BinaryOperator, Literal, LiteralExpr, Program, ReturnStmt,
-        UnaryExpr, UnaryOperator, Visitor, visit,
+        BinaryExpr, BinaryOperator, ExprStmt, Literal, LiteralExpr, PrintStmt,
+        Program, ReturnStmt, UnaryExpr, UnaryOperator, Visitor, visit,
     },
 };
 use rox_vm::{Chunk, Constant, Op};
@@ -113,5 +113,17 @@ impl Visitor for CompilePass<'_> {
                 self.chunk.encode(Op::Multiply, star.span())
             }
         }
+    }
+
+    fn visit_print_stmt(&mut self, node: &PrintStmt) {
+        visit::visit_print_stmt(self, node);
+
+        self.chunk.encode(Op::Print, node.print.span());
+    }
+
+    fn visit_expr_stmt(&mut self, node: &ExprStmt) {
+        visit::visit_expr_stmt(self, node);
+
+        self.chunk.encode(Op::Pop, node.semi.span());
     }
 }

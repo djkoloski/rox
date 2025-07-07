@@ -1,4 +1,4 @@
-use core::hash::BuildHasher;
+use core::{fmt, hash::BuildHasher};
 
 use hashbrown::{DefaultHashBuilder, HashTable};
 
@@ -71,13 +71,14 @@ impl<'chunk> VirtualMachine<'chunk> {
     }
 
     fn execute_inner(&mut self) -> Result<(), RuntimeError> {
-        loop {
+        while self.ip < self.chunk.bytes().len() {
             #[cfg(feature = "trace")]
             self.trace();
 
             match self.read_op()? {
                 Op::Return => {
-                    println!("{}", self.pop()?);
+                    let value = self.pop()?;
+                    println!("{}", self.display(&value));
                     break;
                 }
                 Op::Constant { index } => {
@@ -137,16 +138,32 @@ impl<'chunk> VirtualMachine<'chunk> {
                     let lhs = self.pop()?.float()?;
                     self.push(Value::Boolean(lhs < rhs))?;
                 }
+                Op::Print => {
+                    let value = self.pop()?;
+                    println!("{}", self.display(&value));
+                }
+                Op::Pop => {
+                    self.pop()?;
+                }
             }
         }
         Ok(())
+    }
+
+    fn display<'a>(&'a self, value: &'a Value) -> &'a dyn fmt::Display {
+        match value {
+            Value::Float(f) => f,
+            Value::Boolean(b) => b,
+            Value::Nil => &"<nil>",
+            Value::String(i) => &self.strings[*i],
+        }
     }
 
     #[allow(unused)]
     fn trace(&self) {
         print!("          ");
         for value in &self.stack {
-            print!("[{value}]");
+            print!("[{}]", self.display(value));
         }
         println!();
 

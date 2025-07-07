@@ -93,11 +93,11 @@ impl Parser {
             | Token::For(_)
             | Token::Return(_)
             | Token::LeftBrace(_) => self.declaration()?,
-            _ => Stmt::Return(ReturnStmt {
-                return_: Return {
+            _ => Stmt::Print(PrintStmt {
+                print: Print {
                     span: Span::new(0, 0),
                 },
-                expr: Some(self.expression()?),
+                expr: self.expression()?,
                 semi: Semicolon {
                     span: Span::new(0, 0),
                 },

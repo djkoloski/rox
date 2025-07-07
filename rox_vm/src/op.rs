@@ -116,5 +116,7 @@ define_ops! {
         Equal,
         Greater,
         Less,
+        Print,
+        Pop,
     }
 }

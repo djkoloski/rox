@@ -58,16 +58,16 @@ impl fmt::Display for RuntimeError {
             Self::ObjectOutOfBounds => write!(f, "object out of bounds")?,
             Self::Decode(e) => write!(f, "decode error: {e}")?,
             Self::ExpectedFloat(actual) => {
-                write!(f, "expected float, got {actual}")?
+                write!(f, "expected float, got {actual:?}")?
             }
             Self::ExpectedBoolean(actual) => {
-                write!(f, "expected boolean, got {actual}")?
+                write!(f, "expected boolean, got {actual:?}")?
             }
             Self::ExpectedString(actual) => {
-                write!(f, "expected string, got {actual}")?
+                write!(f, "expected string, got {actual:?}")?
             }
             Self::ExpectedFloatOrString(actual) => {
-                write!(f, "expected float or string, got {actual}")?
+                write!(f, "expected float or string, got {actual:?}")?
             }
         }
 
