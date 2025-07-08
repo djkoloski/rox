@@ -1,5 +1,7 @@
 mod error;
 
+use std::collections::HashMap;
+
 use rox_diag::Spanned;
 use rox_parse::{
     Visit as _,
@@ -21,7 +23,7 @@ pub struct CompileOutput {
 pub struct CompilePass<'a> {
     ast: &'a Program,
     chunk: Chunk,
-    // TODO: intern strings
+    strings: HashMap<String, usize>,
     errors: Vec<CompileError>,
 }
 
@@ -30,6 +32,7 @@ impl<'a> CompilePass<'a> {
         Self {
             ast,
             chunk: Chunk::new(),
+            strings: HashMap::new(),
             errors: Vec::new(),
         }
     }
@@ -41,6 +44,21 @@ impl<'a> CompilePass<'a> {
             errors: self.errors,
         }
     }
+
+    fn add_float(&mut self, float: f64) -> usize {
+        self.chunk.add_constant(Constant::Float(float))
+    }
+
+    fn add_string(&mut self, string: String) -> usize {
+        if let Some(index) = self.strings.get(&string) {
+            *index
+        } else {
+            let index =
+                self.chunk.add_constant(Constant::String(string.clone()));
+            self.strings.insert(string, index);
+            index
+        }
+    }
 }
 
 impl Visitor for CompilePass<'_> {
@@ -49,13 +67,11 @@ impl Visitor for CompilePass<'_> {
 
         match &node.literal {
             Literal::Float(n) => {
-                let constant = Constant::Float(n.value);
-                let index = self.chunk.add_constant(constant);
+                let index = self.add_float(n.value);
                 self.chunk.encode(Op::constant(index), node.span());
             }
             Literal::String(s) => {
-                let constant = Constant::String(s.value.clone());
-                let index = self.chunk.add_constant(constant);
+                let index = self.add_string(s.value.clone());
                 self.chunk.encode(Op::constant(index), node.span());
             }
             Literal::Nil(_) => self.chunk.encode(Op::Nil, node.span()),
@@ -124,18 +140,14 @@ impl Visitor for CompilePass<'_> {
     }
 
     fn visit_variable_expr(&mut self, node: &VariableExpr) {
-        let index = self
-            .chunk
-            .add_constant(Constant::String(node.ident.value.clone()));
+        let index = self.add_string(node.ident.value.clone());
         self.chunk.encode(Op::get_global(index), node.ident.span());
     }
 
     fn visit_assign_expr(&mut self, node: &AssignExpr) {
         visit::visit_assign_expr(self, node);
 
-        let index = self
-            .chunk
-            .add_constant(Constant::String(node.ident.value.clone()));
+        let index = self.add_string(node.ident.value.clone());
         self.chunk.encode(Op::set_global(index), node.equal.span());
     }
 
@@ -158,9 +170,7 @@ impl Visitor for CompilePass<'_> {
             self.chunk.encode(Op::Nil, node.var.span());
         }
 
-        let index = self
-            .chunk
-            .add_constant(Constant::String(node.ident.value.clone()));
+        let index = self.add_string(node.ident.value.clone());
         self.chunk
             .encode(Op::define_global(index), node.ident.span());
     }
