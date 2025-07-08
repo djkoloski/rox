@@ -84,7 +84,11 @@ impl Chunk {
             | Op::GetGlobal { index }
             | Op::GetGlobalLong { index }
             | Op::SetGlobal { index }
-            | Op::SetGlobalLong { index } => self.debug_constant(index),
+            | Op::SetGlobalLong { index }
+            | Op::GetLocal { index }
+            | Op::GetLocalLong { index }
+            | Op::SetLocal { index }
+            | Op::SetLocalLong { index } => self.debug_constant(index),
         }
 
         println!();

@@ -43,6 +43,7 @@ pub enum RuntimeError {
     ExpectedVariableName { index: usize },
     GlobalAlreadyDefined { name: String, value: Value },
     UndefinedGlobal { name: String },
+    LocalVariableOutOfBounds { index: usize },
 }
 
 impl From<DecodeError> for RuntimeError {
@@ -84,6 +85,9 @@ impl fmt::Display for RuntimeError {
             }
             Self::UndefinedGlobal { name } => {
                 write!(f, "global variable '{name}' was undefined")?;
+            }
+            Self::LocalVariableOutOfBounds { index } => {
+                write!(f, "local variable #{index} was out-of-bounds")?;
             }
         }
 

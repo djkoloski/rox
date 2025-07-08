@@ -149,6 +149,22 @@ define_ops! {
             #[codec(U24)]
             index: usize,
         },
+        GetLocal {
+            #[codec(U8)]
+            index: usize,
+        },
+        GetLocalLong {
+            #[codec(U24)]
+            index: usize,
+        },
+        SetLocal {
+            #[codec(U8)]
+            index: usize,
+        },
+        SetLocalLong {
+            #[codec(U24)]
+            index: usize,
+        },
     }
 }
 
@@ -182,4 +198,6 @@ long_ops! {
     define_global: DefineGlobal DefineGlobalLong,
     get_global: GetGlobal GetGlobalLong,
     set_global: SetGlobal SetGlobalLong,
+    get_local: GetLocal GetLocalLong,
+    set_local: SetLocal SetLocalLong,
 }

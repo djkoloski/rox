@@ -127,6 +127,13 @@ fn compile(
         emit(source, error);
     }
 
+    if !lex_output.errors.is_empty()
+        || !parse_output.errors.is_empty()
+        || !compile_output.errors.is_empty()
+    {
+        return Err(Error::Compile);
+    }
+
     Ok(compile_output.chunk)
 }
 

@@ -1,4 +1,5 @@
 mod error;
+mod name_resolution;
 
 use std::collections::HashMap;
 
@@ -6,34 +7,36 @@ use rox_diag::Spanned;
 use rox_parse::{
     Visit as _,
     ast::{
-        AssignExpr, BinaryExpr, BinaryOperator, ExprStmt, Literal, LiteralExpr,
-        PrintStmt, Program, ReturnStmt, UnaryExpr, UnaryOperator, VarDeclStmt,
-        VariableExpr, Visitor, visit,
+        AssignExpr, BinaryExpr, BinaryOperator, BlockStmt, ExprStmt, Literal,
+        LiteralExpr, PrintStmt, Program, ReturnStmt, UnaryExpr, UnaryOperator,
+        VarDeclStmt, VariableExpr, Visitor, visit,
     },
 };
 use rox_vm::{Chunk, Constant, Op};
 
-use self::error::CompileError;
+use self::{error::CompileError, name_resolution::NameResolution};
 
 pub struct CompileOutput {
     pub chunk: Chunk,
     pub errors: Vec<CompileError>,
 }
 
-pub struct CompilePass<'a> {
-    ast: &'a Program,
+pub struct CompilePass<'ast> {
+    ast: &'ast Program,
     chunk: Chunk,
     strings: HashMap<String, usize>,
     errors: Vec<CompileError>,
+    name_resolution: NameResolution<'ast>,
 }
 
-impl<'a> CompilePass<'a> {
-    pub fn new(ast: &'a Program) -> Self {
+impl<'ast> CompilePass<'ast> {
+    pub fn new(ast: &'ast Program) -> Self {
         Self {
             ast,
             chunk: Chunk::new(),
             strings: HashMap::new(),
             errors: Vec::new(),
+            name_resolution: NameResolution::new(),
         }
     }
 
@@ -61,8 +64,8 @@ impl<'a> CompilePass<'a> {
     }
 }
 
-impl Visitor for CompilePass<'_> {
-    fn visit_literal_expr(&mut self, node: &LiteralExpr) {
+impl<'ast> Visitor<'ast> for CompilePass<'ast> {
+    fn visit_literal_expr(&mut self, node: &'ast LiteralExpr) {
         visit::visit_literal_expr(self, node);
 
         match &node.literal {
@@ -80,13 +83,13 @@ impl Visitor for CompilePass<'_> {
         }
     }
 
-    fn visit_return_stmt(&mut self, node: &ReturnStmt) {
+    fn visit_return_stmt(&mut self, node: &'ast ReturnStmt) {
         visit::visit_return_stmt(self, node);
 
         self.chunk.encode(Op::Return, node.return_.span());
     }
 
-    fn visit_unary_expr(&mut self, node: &UnaryExpr) {
+    fn visit_unary_expr(&mut self, node: &'ast UnaryExpr) {
         visit::visit_unary_expr(self, node);
 
         match &node.operator {
@@ -97,7 +100,7 @@ impl Visitor for CompilePass<'_> {
         }
     }
 
-    fn visit_binary_expr(&mut self, node: &BinaryExpr) {
+    fn visit_binary_expr(&mut self, node: &'ast BinaryExpr) {
         visit::visit_binary_expr(self, node);
 
         match &node.operator {
@@ -139,39 +142,63 @@ impl Visitor for CompilePass<'_> {
         }
     }
 
-    fn visit_variable_expr(&mut self, node: &VariableExpr) {
-        let index = self.add_string(node.ident.value.clone());
-        self.chunk.encode(Op::get_global(index), node.ident.span());
+    fn visit_variable_expr(&mut self, node: &'ast VariableExpr) {
+        if let Some(index) = self.name_resolution.resolve(&node.ident) {
+            self.chunk.encode(Op::get_local(index), node.ident.span());
+        } else {
+            let index = self.add_string(node.ident.value.clone());
+            self.chunk.encode(Op::get_global(index), node.ident.span());
+        }
     }
 
-    fn visit_assign_expr(&mut self, node: &AssignExpr) {
+    fn visit_assign_expr(&mut self, node: &'ast AssignExpr) {
         visit::visit_assign_expr(self, node);
 
-        let index = self.add_string(node.ident.value.clone());
-        self.chunk.encode(Op::set_global(index), node.equal.span());
+        if let Some(index) = self.name_resolution.resolve(&node.ident) {
+            self.chunk.encode(Op::set_local(index), node.ident.span());
+        } else {
+            let index = self.add_string(node.ident.value.clone());
+            self.chunk.encode(Op::set_global(index), node.equal.span());
+        }
     }
 
-    fn visit_print_stmt(&mut self, node: &PrintStmt) {
+    fn visit_print_stmt(&mut self, node: &'ast PrintStmt) {
         visit::visit_print_stmt(self, node);
 
         self.chunk.encode(Op::Print, node.print.span());
     }
 
-    fn visit_expr_stmt(&mut self, node: &ExprStmt) {
+    fn visit_expr_stmt(&mut self, node: &'ast ExprStmt) {
         visit::visit_expr_stmt(self, node);
 
         self.chunk.encode(Op::Pop, node.semi.span());
     }
 
-    fn visit_var_decl_stmt(&mut self, node: &VarDeclStmt) {
+    fn visit_var_decl_stmt(&mut self, node: &'ast VarDeclStmt) {
         if let Some(assignment) = &node.assignment {
             assignment.expr.accept(self);
         } else {
             self.chunk.encode(Op::Nil, node.var.span());
         }
 
-        let index = self.add_string(node.ident.value.clone());
-        self.chunk
-            .encode(Op::define_global(index), node.ident.span());
+        if self.name_resolution.is_global() {
+            let index = self.add_string(node.ident.value.clone());
+            self.chunk
+                .encode(Op::define_global(index), node.ident.span());
+        } else if let Err(error) = self.name_resolution.define(&node.ident) {
+            self.errors.push(error);
+        }
+    }
+
+    fn visit_block_stmt(&mut self, node: &'ast BlockStmt) {
+        self.name_resolution.push_scope();
+
+        visit::visit_block_stmt(self, node);
+
+        for _ in 0..self.name_resolution.local_scope_len() {
+            self.chunk.encode(Op::Pop, node.rbrace.span());
+        }
+
+        self.name_resolution.pop_scope();
     }
 }

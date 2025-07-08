@@ -200,6 +200,23 @@ impl<'chunk> VirtualMachine<'chunk> {
                     };
                     *target = value;
                 }
+                Op::GetLocal { index } | Op::GetLocalLong { index } => {
+                    let Some(value) = self.stack.get(index) else {
+                        return Err(RuntimeError::LocalVariableOutOfBounds {
+                            index,
+                        });
+                    };
+                    self.push(value.clone())?;
+                }
+                Op::SetLocal { index } | Op::SetLocalLong { index } => {
+                    let value = self.pop()?;
+                    let Some(target) = self.stack.get_mut(index) else {
+                        return Err(RuntimeError::LocalVariableOutOfBounds {
+                            index,
+                        });
+                    };
+                    *target = value;
+                }
             }
         }
         Ok(())

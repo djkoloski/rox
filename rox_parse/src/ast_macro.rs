@@ -6,7 +6,7 @@ macro_rules! ast {
             define_visitor_fns! { $($tt)* }
         }
 
-        pub trait Visitor {
+        pub trait Visitor<'ast> {
             define_visitor_trait_fns! { $($tt)* }
         }
 
@@ -23,7 +23,10 @@ macro_rules! define_visitor_fns {
         $($rest:tt)*
     ) => {
         #[allow(unused_variables)]
-        pub fn $fn<V: Visitor + ?Sized>(visitor: &mut V, node: &$name) {
+        pub fn $fn<'ast, V>(visitor: &mut V, node: &'ast $name)
+        where
+            V: Visitor<'ast> + ?Sized,
+        {
             visit_fields! { node visitor => $($tt)* }
         }
 
@@ -53,7 +56,7 @@ macro_rules! define_visitor_trait_fns {
         $($rest:tt)*
     ) => {
         #[allow(unused_variables)]
-        fn $fn(&mut self, node: &$name) {
+        fn $fn(&mut self, node: &'ast $name) {
             visit::$fn(self, node);
         }
 
@@ -83,8 +86,8 @@ macro_rules! impl_visits {
         pub struct $name:ident { $($tt:tt)* }
         $($rest:tt)*
     ) => {
-        impl<V: Visitor + ?Sized> $crate::Visit<V> for $name {
-            fn accept(&self, visitor: &mut V) {
+        impl<'ast, V: Visitor<'ast> + ?Sized> $crate::Visit<'ast, V> for $name {
+            fn accept(&'ast self, visitor: &mut V) {
                 Visitor::$fn(visitor, self)
             }
         }
@@ -95,9 +98,9 @@ macro_rules! impl_visits {
         pub struct $name:ident { $($tt:tt)* }
         $($rest:tt)*
     ) => {
-        impl<V: Visitor + ?Sized> $crate::Visit<V> for $name {
+        impl<'ast, V: Visitor<'ast> + ?Sized> $crate::Visit<'ast, V> for $name {
             #[allow(unused_variables)]
-            fn accept(&self, visitor: &mut V) {
+            fn accept(&'ast self, visitor: &mut V) {
                 visit_fields! { self visitor => $($tt)* }
             }
         }
@@ -108,8 +111,8 @@ macro_rules! impl_visits {
         pub enum $name:ident { $($variant:ident($ty:ty),)* }
         $($rest:tt)*
     ) => {
-        impl<V: Visitor + ?Sized> $crate::Visit<V> for $name {
-            fn accept(&self, visitor: &mut V) {
+        impl<'ast, V: Visitor<'ast> + ?Sized> $crate::Visit<'ast, V> for $name {
+            fn accept(&'ast self, visitor: &mut V) {
                 match self {
                     $(
                         Self::$variant(value) =>
