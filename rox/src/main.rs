@@ -6,7 +6,6 @@ use std::{
     process::exit,
 };
 
-use rox_compile::CompilePass;
 use rox_diag::{Diagnostic, Formatter};
 use rox_lex::Lexer;
 use rox_parse::{ParseOutput, Parser};
@@ -126,22 +125,16 @@ fn compile(
         emit(source, error);
     }
 
-    let program = parse_output.ast.ok_or(Error::Compile)?;
+    let ast = parse_output.ast.ok_or(Error::Compile)?;
 
-    let compile_output = CompilePass::new(&program).compile();
-
-    for error in &compile_output.errors {
-        emit(source, error);
-    }
-
-    if !lex_output.errors.is_empty()
-        || !parse_output.errors.is_empty()
-        || !compile_output.errors.is_empty()
-    {
-        return Err(Error::Compile);
-    }
-
-    Ok(compile_output.chunk)
+    let should_assemble =
+        lex_output.errors.is_empty() && parse_output.errors.is_empty();
+    rox_compile::compile(&ast, should_assemble).map_err(|errors| {
+        for error in &errors {
+            emit(source, error);
+        }
+        Error::Compile
+    })
 }
 
 fn emit<T: Diagnostic>(source: &str, diagnostic: &T) {

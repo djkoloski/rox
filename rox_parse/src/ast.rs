@@ -1,6 +1,8 @@
 use rox_lex::token_kind::*;
 
-use crate::{Punctuated, ast_macro::*};
+use crate::{
+    Decoration, LocalsCount, NameResolution, Punctuated, ast_macro::*,
+};
 
 token_group! {
     pub enum Literal {
@@ -80,11 +82,13 @@ ast! {
 
     #[accept = visit_variable_expr]
     pub struct VariableExpr {
+        pub name_resolution: Decoration<NameResolution>,
         pub ident: Identifier,
     }
 
     #[accept = visit_assign_expr]
     pub struct AssignExpr {
+        pub name_resolution: Decoration<NameResolution>,
         pub ident: Identifier,
         pub equal: Equal,
         #[visit]
@@ -181,6 +185,7 @@ ast! {
 
     pub struct Inheritance {
         pub less: Less,
+        // pub name_resolution: Decoration<NameResolution>,
         pub superclass: Identifier,
     }
 
@@ -210,6 +215,7 @@ ast! {
 
     #[accept = visit_block_stmt]
     pub struct BlockStmt {
+        pub locals_count: Decoration<LocalsCount>,
         pub lbrace: LeftBrace,
         #[visit]
         pub stmts: Vec<Stmt>,

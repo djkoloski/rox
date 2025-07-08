@@ -4,17 +4,25 @@ use rox_diag::{Diagnostic, Formatter, Span};
 
 #[derive(Debug)]
 pub enum CompileError {
-    LocalRedefined { original: Span, redefinition: Span },
+    UndefinedItem { span: Span },
+    ItemRedefined { original: Span, redefinition: Span },
 }
 
 impl Diagnostic for CompileError {
     fn fmt(&self, f: &mut Formatter<'_, '_>) -> fmt::Result {
         match self {
-            Self::LocalRedefined {
+            Self::UndefinedItem { span } => {
+                f.error(format_args!(
+                    "undefined item '{}'",
+                    span.get(f.source())
+                ))?;
+                f.span_error(*span, format_args!("referenced here"))?;
+            }
+            Self::ItemRedefined {
                 original,
                 redefinition,
             } => {
-                f.error(format_args!("local variable already defined"))?;
+                f.error(format_args!("duplicate item definition"))?;
                 f.span_error(
                     *redefinition,
                     format_args!(

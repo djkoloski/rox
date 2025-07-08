@@ -4,7 +4,7 @@ use rox_diag::{Span, Spanned as _};
 use rox_lex::{Token, TokenKind, token_kind::*};
 
 use crate::{
-    ParseError, Punctuated,
+    Decorator, ParseError, Punctuated,
     ast::{
         AssignExpr, Assignment, BinaryExpr, BinaryOperator, BlockStmt,
         CallExpr, ClassDeclStmt, ElseClause, Expr, ExprStmt, FunDeclStmt,
@@ -14,13 +14,19 @@ use crate::{
     },
 };
 
+pub struct Ast {
+    pub program: Program,
+    pub decorator: Decorator,
+}
+
 pub struct ParseOutput {
-    pub ast: Option<Program>,
+    pub ast: Option<Ast>,
     pub errors: Vec<ParseError>,
 }
 
 pub struct Parser {
     tokens: VecDeque<Token>,
+    decorator: Decorator,
     errors: Vec<ParseError>,
 }
 
@@ -28,22 +34,27 @@ impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
         Self {
             tokens: VecDeque::from(tokens),
+            decorator: Decorator::new(),
             errors: Vec::new(),
         }
     }
 
     pub fn parse(mut self) -> ParseOutput {
-        let ast = self.program();
-        ParseOutput {
-            ast,
-            errors: self.errors,
-        }
+        let program = self.program();
+        self.into_output(program)
     }
 
     pub fn parse_repl(mut self) -> ParseOutput {
-        let ast = self.repl();
+        let program = self.repl();
+        self.into_output(program)
+    }
+
+    fn into_output(self, program: Option<Program>) -> ParseOutput {
         ParseOutput {
-            ast,
+            ast: program.map(|program| Ast {
+                program,
+                decorator: self.decorator,
+            }),
             errors: self.errors,
         }
     }
@@ -383,6 +394,7 @@ impl Parser {
         let mut body = self.statement()?;
         if let Some(increment) = increment {
             body = Stmt::Block(BlockStmt {
+                locals_count: self.decorator.decorate(),
                 lbrace: LeftBrace { span: for_.span() },
                 stmts: vec![
                     body,
@@ -411,6 +423,7 @@ impl Parser {
         );
 
         Some(Stmt::Block(BlockStmt {
+            locals_count: self.decorator.decorate(),
             lbrace: LeftBrace { span: for_.span() },
             stmts,
             rbrace: RightBrace { span: for_.span() },
@@ -456,6 +469,7 @@ impl Parser {
         let rbrace = self.expect()?;
 
         Some(BlockStmt {
+            locals_count: self.decorator.decorate(),
             lbrace,
             stmts,
             rbrace,
@@ -495,13 +509,15 @@ impl Parser {
                         expr: Box::new(value),
                     }))
                 }
-                Expr::Variable(VariableExpr { ident }) => {
-                    Some(Expr::Assign(AssignExpr {
-                        ident,
-                        equal,
-                        expr: Box::new(value),
-                    }))
-                }
+                Expr::Variable(VariableExpr {
+                    name_resolution,
+                    ident,
+                }) => Some(Expr::Assign(AssignExpr {
+                    name_resolution,
+                    ident,
+                    equal,
+                    expr: Box::new(value),
+                })),
                 _ => {
                     self.errors
                         .push(ParseError::InvalidAssignmentTarget(expr.span()));
@@ -661,6 +677,7 @@ impl Parser {
             })),
             Token::LeftParen(_) => self.grouped().map(Expr::Grouping),
             Token::Identifier(_) => Some(Expr::Variable(VariableExpr {
+                name_resolution: self.decorator.decorate(),
                 ident: self.assume(),
             })),
             Token::This(_) => Some(Expr::This(ThisExpr {
