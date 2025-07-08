@@ -7,9 +7,9 @@ use rox_diag::Spanned;
 use rox_parse::{
     Visit as _,
     ast::{
-        AssignExpr, BinaryExpr, BinaryOperator, BlockStmt, ExprStmt, Literal,
-        LiteralExpr, PrintStmt, Program, ReturnStmt, UnaryExpr, UnaryOperator,
-        VarDeclStmt, VariableExpr, Visitor, visit,
+        AssignExpr, BinaryExpr, BinaryOperator, BlockStmt, ExprStmt, IfStmt,
+        Literal, LiteralExpr, PrintStmt, Program, ReturnStmt, UnaryExpr,
+        UnaryOperator, VarDeclStmt, VariableExpr, Visitor, WhileStmt, visit,
     },
 };
 use rox_vm::{Chunk, Constant, Op};
@@ -101,42 +101,68 @@ impl<'ast> Visitor<'ast> for CompilePass<'ast> {
     }
 
     fn visit_binary_expr(&mut self, node: &'ast BinaryExpr) {
-        visit::visit_binary_expr(self, node);
-
         match &node.operator {
-            BinaryOperator::And(_and) => todo!(),
-            BinaryOperator::Or(_or) => todo!(),
+            BinaryOperator::And(and) => {
+                node.left.accept(self);
+                let to_end = self
+                    .chunk
+                    .encode_jump(Op::JumpIfFalse { distance: 0 }, and.span());
+                self.chunk.encode(Op::Pop, and.span());
+                node.right.accept(self);
+                self.chunk.patch_jump(to_end);
+            }
+            BinaryOperator::Or(or) => {
+                node.left.accept(self);
+                let to_rhs = self
+                    .chunk
+                    .encode_jump(Op::JumpIfFalse { distance: 0 }, or.span());
+                let to_end =
+                    self.chunk.encode_jump(Op::Jump { distance: 0 }, or.span());
+                self.chunk.patch_jump(to_rhs);
+                node.right.accept(self);
+                self.chunk.patch_jump(to_end);
+            }
             BinaryOperator::Greater(greater) => {
+                visit::visit_binary_expr(self, node);
                 self.chunk.encode(Op::Greater, greater.span())
             }
             BinaryOperator::GreaterEqual(greater_equal) => {
+                visit::visit_binary_expr(self, node);
                 self.chunk.encode(Op::Less, greater_equal.span());
                 self.chunk.encode(Op::Not, greater_equal.span());
             }
             BinaryOperator::Less(less) => {
+                visit::visit_binary_expr(self, node);
                 self.chunk.encode(Op::Less, less.span())
             }
             BinaryOperator::LessEqual(less_equal) => {
+                visit::visit_binary_expr(self, node);
                 self.chunk.encode(Op::Greater, less_equal.span());
                 self.chunk.encode(Op::Not, less_equal.span());
             }
             BinaryOperator::NotEqual(bang_equal) => {
+                visit::visit_binary_expr(self, node);
                 self.chunk.encode(Op::Equal, bang_equal.span());
                 self.chunk.encode(Op::Not, bang_equal.span());
             }
             BinaryOperator::Equal(equal_equal) => {
+                visit::visit_binary_expr(self, node);
                 self.chunk.encode(Op::Equal, equal_equal.span())
             }
             BinaryOperator::Subtract(minus) => {
+                visit::visit_binary_expr(self, node);
                 self.chunk.encode(Op::Subtract, minus.span())
             }
             BinaryOperator::Add(plus) => {
+                visit::visit_binary_expr(self, node);
                 self.chunk.encode(Op::Add, plus.span())
             }
             BinaryOperator::Divide(slash) => {
+                visit::visit_binary_expr(self, node);
                 self.chunk.encode(Op::Divide, slash.span())
             }
             BinaryOperator::Multiply(star) => {
+                visit::visit_binary_expr(self, node);
                 self.chunk.encode(Op::Multiply, star.span())
             }
         }
@@ -200,5 +226,50 @@ impl<'ast> Visitor<'ast> for CompilePass<'ast> {
         }
 
         self.name_resolution.pop_scope();
+    }
+
+    fn visit_if_stmt(&mut self, node: &'ast IfStmt) {
+        node.condition.accept(self);
+
+        let to_false = self
+            .chunk
+            .encode_jump(Op::JumpIfFalse { distance: 0 }, node.if_.span());
+
+        self.chunk.encode(Op::Pop, node.if_.span());
+        node.stmt.accept(self);
+
+        if let Some(else_clause) = &node.else_clause {
+            let to_end = self.chunk.encode_jump(
+                Op::Jump { distance: 0 },
+                else_clause.else_.span(),
+            );
+
+            self.chunk.patch_jump(to_false);
+
+            self.chunk.encode(Op::Pop, else_clause.else_.span());
+            else_clause.stmt.accept(self);
+
+            self.chunk.patch_jump(to_end);
+        } else {
+            self.chunk.patch_jump(to_false);
+        }
+    }
+
+    fn visit_while_stmt(&mut self, node: &'ast WhileStmt) {
+        let start = self.chunk.current();
+
+        node.expr.accept(self);
+
+        let to_end = self
+            .chunk
+            .encode_jump(Op::JumpIfFalse { distance: 0 }, node.while_.span());
+        self.chunk.encode(Op::Pop, node.while_.span());
+
+        node.body.accept(self);
+
+        self.chunk.encode_loop(start, node.while_.span());
+
+        self.chunk.patch_jump(to_end);
+        self.chunk.encode(Op::Pop, node.while_.span());
     }
 }

@@ -69,6 +69,13 @@ fn run_file(path: &Path) -> Result<(), Error> {
     let source = fs::read_to_string(path)?;
 
     let chunk = compile(&source, Parser::parse)?;
+
+    #[cfg(feature = "trace")]
+    {
+        println!("== {} ==", path.display());
+        chunk.disassemble();
+    }
+
     let mut vm = VirtualMachine::new(&chunk);
     if let Err(e) = vm.execute() {
         emit(&source, &e);

@@ -209,7 +209,7 @@ impl<'chunk> VirtualMachine<'chunk> {
                     self.push(value.clone())?;
                 }
                 Op::SetLocal { index } | Op::SetLocalLong { index } => {
-                    let value = self.pop()?;
+                    let value = self.last()?.clone();
                     let Some(target) = self.stack.get_mut(index) else {
                         return Err(RuntimeError::LocalVariableOutOfBounds {
                             index,
@@ -217,6 +217,13 @@ impl<'chunk> VirtualMachine<'chunk> {
                     };
                     *target = value;
                 }
+                Op::JumpIfFalse { distance } => {
+                    if !self.last()?.truthiness() {
+                        self.ip += distance;
+                    }
+                }
+                Op::Jump { distance } => self.ip += distance,
+                Op::Loop { distance } => self.ip -= distance,
             }
         }
         Ok(())
@@ -258,6 +265,10 @@ impl<'chunk> VirtualMachine<'chunk> {
 
     fn pop(&mut self) -> Result<Value, RuntimeError> {
         self.stack.pop().ok_or(RuntimeError::StackUnderflow)
+    }
+
+    fn last(&self) -> Result<&Value, RuntimeError> {
+        self.stack.last().ok_or(RuntimeError::StackUnderflow)
     }
 
     fn unary_float(

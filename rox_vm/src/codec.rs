@@ -36,7 +36,7 @@ impl Codec for u8 {
 }
 
 #[derive(Debug)]
-pub struct U8(u8);
+pub struct U8(usize);
 
 impl U8 {
     pub const MAX: usize = (1 << 8) - 1;
@@ -44,23 +44,55 @@ impl U8 {
 
 impl From<usize> for U8 {
     fn from(value: usize) -> Self {
-        Self(value as u8)
+        Self(value)
     }
 }
 
 impl From<U8> for usize {
     fn from(value: U8) -> Self {
-        value.0 as usize
+        value.0
     }
 }
 
 impl Codec for U8 {
     fn encode(self, bytes: &mut Vec<u8>) {
-        bytes.push(self.0)
+        bytes.push(self.0 as u8)
     }
 
     fn decode(bytes: &[u8], offset: &mut usize) -> Result<Self, DecodeError> {
-        Ok(Self(u8::decode(bytes, offset)?))
+        Ok(Self(u8::decode(bytes, offset)? as usize))
+    }
+}
+
+#[derive(Debug)]
+pub struct U16(usize);
+
+impl U16 {
+    pub const MAX: usize = (1 << 16) - 1;
+}
+
+impl From<usize> for U16 {
+    fn from(value: usize) -> Self {
+        Self(value)
+    }
+}
+
+impl From<U16> for usize {
+    fn from(value: U16) -> Self {
+        value.0
+    }
+}
+
+impl Codec for U16 {
+    fn encode(self, bytes: &mut Vec<u8>) {
+        bytes.extend_from_slice(&self.0.to_le_bytes()[0..2]);
+    }
+
+    fn decode(bytes: &[u8], offset: &mut usize) -> Result<Self, DecodeError> {
+        Ok(Self(
+            (u8::decode(bytes, offset)? as usize)
+                | (u8::decode(bytes, offset)? as usize) << 8,
+        ))
     }
 }
 

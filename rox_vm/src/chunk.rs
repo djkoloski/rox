@@ -40,8 +40,36 @@ impl Chunk {
         result
     }
 
-    pub fn disassemble(&self, name: &str) {
-        println!("== {name} ==");
+    pub fn encode_jump(&mut self, op: Op, span: Span) -> usize {
+        self.encode(op, span);
+        self.current()
+    }
+
+    pub fn patch_jump(&mut self, target: usize) {
+        let distance = self.current() - target;
+        if distance > u16::MAX as usize {
+            panic!("jump distance too large");
+        }
+
+        let bytes = distance.to_le_bytes();
+        self.bytes[target - 2] = bytes[0];
+        self.bytes[target - 1] = bytes[1];
+    }
+
+    pub fn current(&self) -> usize {
+        self.bytes.len()
+    }
+
+    pub fn encode_loop(&mut self, target: usize, span: Span) {
+        self.encode(
+            Op::Loop {
+                distance: self.current() - target + 3,
+            },
+            span,
+        );
+    }
+
+    pub fn disassemble(&self) {
         let mut offset = 0;
         while offset < self.bytes.len() {
             self.disassemble_instruction(&mut offset);
@@ -76,7 +104,14 @@ impl Chunk {
             | Op::Greater
             | Op::Less
             | Op::Print
-            | Op::Pop => (),
+            | Op::Pop
+            | Op::GetLocal { .. }
+            | Op::GetLocalLong { .. }
+            | Op::SetLocal { .. }
+            | Op::SetLocalLong { .. }
+            | Op::JumpIfFalse { .. }
+            | Op::Jump { .. }
+            | Op::Loop { .. } => (),
             Op::Constant { index }
             | Op::ConstantLong { index }
             | Op::DefineGlobal { index }
@@ -84,11 +119,7 @@ impl Chunk {
             | Op::GetGlobal { index }
             | Op::GetGlobalLong { index }
             | Op::SetGlobal { index }
-            | Op::SetGlobalLong { index }
-            | Op::GetLocal { index }
-            | Op::GetLocalLong { index }
-            | Op::SetLocal { index }
-            | Op::SetLocalLong { index } => self.debug_constant(index),
+            | Op::SetGlobalLong { index } => self.debug_constant(index),
         }
 
         println!();

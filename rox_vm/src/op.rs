@@ -2,7 +2,7 @@ use core::fmt;
 
 use crate::{
     Codec, DecodeError,
-    codec::{U8, U24},
+    codec::{U8, U16, U24},
 };
 
 macro_rules! define_ops {
@@ -165,6 +165,18 @@ define_ops! {
             #[codec(U24)]
             index: usize,
         },
+        JumpIfFalse {
+            #[codec(U16)]
+            distance: usize,
+        },
+        Jump {
+            #[codec(U16)]
+            distance: usize,
+        },
+        Loop {
+            #[codec(U16)]
+            distance: usize,
+        }
     }
 }
 
