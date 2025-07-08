@@ -1,6 +1,9 @@
 use core::fmt;
 
-use crate::{Codec, DecodeError, codec::U24};
+use crate::{
+    Codec, DecodeError,
+    codec::{U8, U24},
+};
 
 macro_rules! define_ops {
     (
@@ -100,12 +103,16 @@ macro_rules! define_ops {
 define_ops! {
     pub enum Op {
         Return,
+        Nil,
+        True,
+        False,
         Constant {
-            index: u8,
+            #[codec(U8)]
+            index: usize,
         },
         ConstantLong {
             #[codec(U24)]
-            index: u32,
+            index: usize,
         },
         Not,
         Negate,
@@ -118,5 +125,61 @@ define_ops! {
         Less,
         Print,
         Pop,
+        DefineGlobal {
+            #[codec(U8)]
+            index: usize,
+        },
+        DefineGlobalLong {
+            #[codec(U24)]
+            index: usize,
+        },
+        GetGlobal {
+            #[codec(U8)]
+            index: usize,
+        },
+        GetGlobalLong {
+            #[codec(U24)]
+            index: usize,
+        },
+        SetGlobal {
+            #[codec(U8)]
+            index: usize,
+        },
+        SetGlobalLong {
+            #[codec(U24)]
+            index: usize,
+        },
     }
+}
+
+macro_rules! long_ops {
+    ($($fn:ident: $short:ident $long:ident),* $(,)?) => {
+        impl Op {
+            $(
+                pub fn $fn(index: usize) -> Self {
+                    if index <= U8::MAX {
+                        Self::$short { index }
+                    } else if index <= U24::MAX {
+                        Self::$long { index }
+                    } else {
+                        panic!(
+                            ::core::concat!(
+                                "attempted to encode a ",
+                                ::core::stringify!($fn),
+                                " op with an index that was too large ({})",
+                            ),
+                            index,
+                        );
+                    }
+                }
+            )*
+        }
+    };
+}
+
+long_ops! {
+    constant: Constant ConstantLong,
+    define_global: DefineGlobal DefineGlobalLong,
+    get_global: GetGlobal GetGlobalLong,
+    set_global: SetGlobal SetGlobalLong,
 }

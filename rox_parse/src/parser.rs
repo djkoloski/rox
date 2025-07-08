@@ -486,17 +486,15 @@ impl Parser {
             let value = self.assignment()?;
 
             match expr {
-                Expr::Get(GetExpr {
-                    instance,
-                    dot,
-                    name,
-                }) => Some(Expr::Set(SetExpr {
-                    instance,
-                    dot,
-                    name,
-                    equal,
-                    expr: Box::new(value),
-                })),
+                Expr::Get(GetExpr { target, dot, name }) => {
+                    Some(Expr::Set(SetExpr {
+                        target,
+                        dot,
+                        name,
+                        equal,
+                        expr: Box::new(value),
+                    }))
+                }
                 Expr::Variable(VariableExpr { ident }) => {
                     Some(Expr::Assign(AssignExpr {
                         ident,
@@ -640,7 +638,7 @@ impl Parser {
                     };
 
                     expr = Expr::Get(GetExpr {
-                        instance: Box::new(expr),
+                        target: Box::new(expr),
                         dot,
                         name,
                     });

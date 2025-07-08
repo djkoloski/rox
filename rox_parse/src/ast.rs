@@ -104,7 +104,7 @@ ast! {
     #[accept = visit_get_expr]
     pub struct GetExpr {
         #[visit]
-        pub instance: Box<Expr>,
+        pub target: Box<Expr>,
         pub dot: Dot,
         pub name: Identifier,
     }
@@ -112,7 +112,7 @@ ast! {
     #[accept = visit_set_expr]
     pub struct SetExpr {
         #[visit]
-        pub instance: Box<Expr>,
+        pub target: Box<Expr>,
         pub dot: Dot,
         pub name: Identifier,
         pub equal: Equal,

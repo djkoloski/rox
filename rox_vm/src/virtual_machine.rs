@@ -1,4 +1,5 @@
 use core::{fmt, hash::BuildHasher};
+use std::collections::HashMap;
 
 use hashbrown::{DefaultHashBuilder, HashTable};
 
@@ -16,6 +17,7 @@ pub struct VirtualMachine<'chunk> {
     hasher: DefaultHashBuilder,
     string_index: HashTable<usize>,
     strings: Vec<String>,
+    globals: HashMap<String, Value>,
 }
 
 impl<'chunk> VirtualMachine<'chunk> {
@@ -28,16 +30,29 @@ impl<'chunk> VirtualMachine<'chunk> {
             hasher: DefaultHashBuilder::default(),
             string_index: HashTable::new(),
             strings: Vec::new(),
+            globals: HashMap::new(),
         }
     }
 
-    fn reify_constant(&mut self, index: usize) -> Value {
-        match &self.chunk.constants()[index] {
-            Constant::Float(f) => Value::Float(*f),
-            Constant::Boolean(b) => Value::Boolean(*b),
-            Constant::Nil => Value::Nil,
-            Constant::String(s) => Value::String(self.intern_string(s)),
-        }
+    fn get_constant(
+        &mut self,
+        index: usize,
+    ) -> Result<&'chunk Constant, RuntimeError> {
+        self.chunk
+            .constants()
+            .get(index)
+            .ok_or(RuntimeError::ConstantOutOfBounds)
+    }
+
+    fn get_variable_name(
+        &mut self,
+        index: usize,
+    ) -> Result<&'chunk String, RuntimeError> {
+        let Constant::String(name) = self.get_constant(index)? else {
+            return Err(RuntimeError::ExpectedVariableName { index });
+        };
+
+        Ok(name)
     }
 
     fn intern_string<S: AsRef<str> + Into<String>>(&mut self, s: S) -> usize {
@@ -57,6 +72,13 @@ impl<'chunk> VirtualMachine<'chunk> {
                 self.strings.push(s.into());
                 result
             }
+        }
+    }
+
+    fn reify_constant(&mut self, index: usize) -> Result<Value, RuntimeError> {
+        match self.get_constant(index)? {
+            Constant::Float(f) => Ok(Value::Float(*f)),
+            Constant::String(s) => Ok(Value::String(self.intern_string(s))),
         }
     }
 
@@ -81,12 +103,11 @@ impl<'chunk> VirtualMachine<'chunk> {
                     println!("{}", self.display(&value));
                     break;
                 }
-                Op::Constant { index } => {
-                    let value = self.reify_constant(index as usize);
-                    self.push(value)?;
-                }
-                Op::ConstantLong { index } => {
-                    let value = self.reify_constant(index as usize);
+                Op::Nil => self.push(Value::Nil)?,
+                Op::True => self.push(Value::Boolean(true))?,
+                Op::False => self.push(Value::Boolean(false))?,
+                Op::Constant { index } | Op::ConstantLong { index } => {
+                    let value = self.reify_constant(index)?;
                     self.push(value)?;
                 }
                 Op::Not => {
@@ -102,20 +123,23 @@ impl<'chunk> VirtualMachine<'chunk> {
                             Value::Float(lhs + rhs)
                         }
                         (Value::String(lhs), Value::String(rhs)) => {
-                            Value::String(
-                                self.intern_string(format!("{lhs}{rhs}")),
-                            )
+                            Value::String(self.intern_string(format!(
+                                "{}{}",
+                                self.strings[lhs], self.strings[rhs]
+                            )))
                         }
-                        (Value::Float(_), rhs) => {
-                            return Err(RuntimeError::ExpectedFloat(rhs));
+                        (Value::Float(_), actual) => {
+                            return Err(RuntimeError::ExpectedFloat { actual });
                         }
-                        (Value::String(_), rhs) => {
-                            return Err(RuntimeError::ExpectedString(rhs));
+                        (Value::String(_), actual) => {
+                            return Err(RuntimeError::ExpectedString {
+                                actual,
+                            });
                         }
-                        (lhs, _) => {
-                            return Err(RuntimeError::ExpectedFloatOrString(
-                                lhs,
-                            ));
+                        (actual, _) => {
+                            return Err(RuntimeError::ExpectedFloatOrString {
+                                actual,
+                            });
                         }
                     };
                     self.push(result)?;
@@ -144,6 +168,37 @@ impl<'chunk> VirtualMachine<'chunk> {
                 }
                 Op::Pop => {
                     self.pop()?;
+                }
+                Op::DefineGlobal { index } | Op::DefineGlobalLong { index } => {
+                    let name = self.get_variable_name(index)?;
+                    let value = self.pop()?;
+
+                    if let Some(prev) = self.globals.insert(name.clone(), value)
+                    {
+                        return Err(RuntimeError::GlobalAlreadyDefined {
+                            name: name.clone(),
+                            value: prev,
+                        });
+                    }
+                }
+                Op::GetGlobal { index } | Op::GetGlobalLong { index } => {
+                    let name = self.get_variable_name(index)?;
+                    let Some(global) = self.globals.get(name) else {
+                        return Err(RuntimeError::UndefinedGlobal {
+                            name: name.clone(),
+                        });
+                    };
+                    self.push(global.clone())?;
+                }
+                Op::SetGlobal { index } | Op::SetGlobalLong { index } => {
+                    let name = self.get_variable_name(index)?;
+                    let value = self.pop()?;
+                    let Some(target) = self.globals.get_mut(name) else {
+                        return Err(RuntimeError::UndefinedGlobal {
+                            name: name.clone(),
+                        });
+                    };
+                    *target = value;
                 }
             }
         }

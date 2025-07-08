@@ -34,19 +34,6 @@ impl Chunk {
         self.spans.extend(span, self.bytes.len() - self.spans.len());
     }
 
-    pub fn encode_constant(&mut self, index: usize, span: Span) {
-        if index <= u8::MAX as usize {
-            self.encode(Op::Constant { index: index as u8 }, span);
-        } else {
-            self.encode(
-                Op::ConstantLong {
-                    index: index as u32,
-                },
-                span,
-            );
-        }
-    }
-
     pub fn add_constant(&mut self, constant: Constant) -> usize {
         let result = self.constants.len();
         self.constants.push(constant);
@@ -74,10 +61,30 @@ impl Chunk {
         let op = Op::decode(self.bytes(), offset).unwrap();
         print!("{op:16}");
 
-        match &op {
-            Op::Constant { index } => self.debug_constant(*index as usize),
-            Op::ConstantLong { index } => self.debug_constant(*index as usize),
-            _ => (),
+        match op {
+            Op::Return
+            | Op::Nil
+            | Op::True
+            | Op::False
+            | Op::Not
+            | Op::Negate
+            | Op::Add
+            | Op::Subtract
+            | Op::Multiply
+            | Op::Divide
+            | Op::Equal
+            | Op::Greater
+            | Op::Less
+            | Op::Print
+            | Op::Pop => (),
+            Op::Constant { index }
+            | Op::ConstantLong { index }
+            | Op::DefineGlobal { index }
+            | Op::DefineGlobalLong { index }
+            | Op::GetGlobal { index }
+            | Op::GetGlobalLong { index }
+            | Op::SetGlobal { index }
+            | Op::SetGlobalLong { index } => self.debug_constant(index),
         }
 
         println!();

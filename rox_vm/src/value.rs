@@ -2,11 +2,9 @@ use core::fmt;
 
 use crate::RuntimeError;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum Constant {
     Float(f64),
-    Boolean(bool),
-    Nil,
     String(String),
 }
 
@@ -14,8 +12,6 @@ impl fmt::Display for Constant {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Float(value) => write!(f, "{value}"),
-            Self::Boolean(value) => write!(f, "{value}"),
-            Self::Nil => write!(f, "<nil>"),
             Self::String(value) => write!(f, "{value}"),
         }
     }
@@ -41,14 +37,14 @@ impl Value {
     pub fn float(self) -> Result<f64, RuntimeError> {
         match self {
             Self::Float(n) => Ok(n),
-            _ => Err(RuntimeError::ExpectedFloat(self)),
+            _ => Err(RuntimeError::ExpectedFloat { actual: self }),
         }
     }
 
     pub fn boolean(self) -> Result<bool, RuntimeError> {
         match self {
             Self::Boolean(b) => Ok(b),
-            _ => Err(RuntimeError::ExpectedBoolean(self)),
+            _ => Err(RuntimeError::ExpectedBoolean { actual: self }),
         }
     }
 }
