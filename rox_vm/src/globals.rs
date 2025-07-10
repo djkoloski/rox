@@ -21,5 +21,5 @@ macro_rules! define_globals {
 }
 
 define_globals! {
-    clock: Value::NativeFunction(NativeFunction::Clock),
+    clock: Value::native_function(NativeFunction::Clock as usize),
 }

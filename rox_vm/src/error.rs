@@ -3,7 +3,7 @@ use std::time::SystemTimeError;
 
 use rox_diag::{Diagnostic, Formatter, Span};
 
-use crate::{DecodeError, Value};
+use crate::{DecodeError, InvalidNativeFunction, UnpackedValue};
 
 #[derive(Debug)]
 pub struct RuntimeDiagnostic {
@@ -33,19 +33,17 @@ impl Diagnostic for RuntimeDiagnostic {
 pub enum RuntimeError {
     Decode(DecodeError),
     SystemTimeError(SystemTimeError),
+    InvalidNativeFunction(InvalidNativeFunction),
 
     StackOverflow,
     StackUnderflow,
-    BytecodeOutOfBounds,
     ConstantOutOfBounds,
-    ObjectOutOfBounds,
-    ExpectedFloat { actual: Value },
-    ExpectedBoolean { actual: Value },
-    ExpectedString { actual: Value },
-    ExpectedFloatOrString { actual: Value },
+    ExpectedFloat { actual: UnpackedValue },
+    ExpectedString { actual: UnpackedValue },
+    ExpectedFloatOrString { actual: UnpackedValue },
     ExpectedVariableName { index: usize },
-    ExpectedFunction { actual: Value },
-    GlobalAlreadyDefined { name: String, value: Value },
+    ExpectedFunction { actual: UnpackedValue },
+    GlobalAlreadyDefined { name: String, value: UnpackedValue },
     UndefinedGlobal { name: String },
     LocalVariableOutOfBounds { index: usize },
     TooFewArguments { arity: usize },
@@ -63,22 +61,26 @@ impl From<SystemTimeError> for RuntimeError {
     }
 }
 
+impl From<InvalidNativeFunction> for RuntimeError {
+    fn from(value: InvalidNativeFunction) -> Self {
+        Self::InvalidNativeFunction(value)
+    }
+}
+
 impl fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Decode(e) => write!(f, "decode error: {e}")?,
             Self::SystemTimeError(e) => write!(f, "system time error: {e}")?,
+            Self::InvalidNativeFunction(e) => {
+                write!(f, "invalid native function: {}", e.index)?
+            }
 
             Self::StackOverflow => write!(f, "stack overflow")?,
             Self::StackUnderflow => write!(f, "stack underflow")?,
-            Self::BytecodeOutOfBounds => write!(f, "bytecode out of bounds")?,
             Self::ConstantOutOfBounds => write!(f, "constant out of bounds")?,
-            Self::ObjectOutOfBounds => write!(f, "object out of bounds")?,
             Self::ExpectedFloat { actual } => {
                 write!(f, "expected float, got {actual:?}")?;
-            }
-            Self::ExpectedBoolean { actual } => {
-                write!(f, "expected boolean, got {actual:?}")?;
             }
             Self::ExpectedString { actual } => {
                 write!(f, "expected string, got {actual:?}")?;

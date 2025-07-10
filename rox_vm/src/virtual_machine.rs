@@ -8,7 +8,7 @@ use hashbrown::{DefaultHashBuilder, HashTable};
 
 use crate::{
     Codec, Constant, Executable, NativeFunction, Op, RuntimeDiagnostic,
-    RuntimeError, Value, global_values,
+    RuntimeError, UnpackedValue, Value, global_values,
 };
 
 const MAX_STACK_LEN: usize = 255;
@@ -82,9 +82,9 @@ impl<'exe> VirtualMachine<'exe> {
 
     fn reify_constant(&mut self, index: usize) -> Result<Value, RuntimeError> {
         match self.get_constant(index)? {
-            Constant::Float(f) => Ok(Value::Float(*f)),
-            Constant::String(s) => Ok(Value::String(self.intern_string(s))),
-            Constant::Function(i) => Ok(Value::Function(*i)),
+            Constant::Float(f) => Ok(Value::float(*f)),
+            Constant::String(s) => Ok(Value::string(self.intern_string(s))),
+            Constant::Function(i) => Ok(Value::function(*i)),
         }
     }
 
@@ -101,7 +101,7 @@ impl<'exe> VirtualMachine<'exe> {
     fn execute_inner(&mut self) -> Result<(), RuntimeError> {
         while self.ip < self.executable.chunk.bytes().len() {
             #[cfg(feature = "trace")]
-            self.trace();
+            self.trace()?;
 
             let mut next_ip = self.ip;
             match Op::decode(self.executable.chunk.bytes(), &mut next_ip)? {
@@ -115,35 +115,37 @@ impl<'exe> VirtualMachine<'exe> {
 
                     self.push(value)?;
                 }
-                Op::Nil => self.push(Value::Nil)?,
-                Op::True => self.push(Value::Boolean(true))?,
-                Op::False => self.push(Value::Boolean(false))?,
+                Op::Nil => self.push(Value::nil())?,
+                Op::True => self.push(Value::boolean(true))?,
+                Op::False => self.push(Value::boolean(false))?,
                 Op::Constant { index } | Op::ConstantLong { index } => {
                     let value = self.reify_constant(index)?;
                     self.push(value)?;
                 }
                 Op::Not => {
                     let target = self.pop()?;
-                    self.push(Value::Boolean(!target.truthiness()))?;
+                    self.push(Value::boolean(!target.truthiness()))?;
                 }
                 Op::Negate => self.unary_float(|n| -n)?,
                 Op::Add => {
                     let rhs = self.pop()?;
                     let lhs = self.pop()?;
-                    let result = match (lhs, rhs) {
-                        (Value::Float(lhs), Value::Float(rhs)) => {
-                            Value::Float(lhs + rhs)
-                        }
-                        (Value::String(lhs), Value::String(rhs)) => {
-                            Value::String(self.intern_string(format!(
-                                "{}{}",
-                                self.strings[lhs], self.strings[rhs]
-                            )))
-                        }
-                        (Value::Float(_), actual) => {
+                    let result = match (lhs.unpack()?, rhs.unpack()?) {
+                        (
+                            UnpackedValue::Float(lhs),
+                            UnpackedValue::Float(rhs),
+                        ) => Value::float(lhs + rhs),
+                        (
+                            UnpackedValue::String(lhs),
+                            UnpackedValue::String(rhs),
+                        ) => Value::string(self.intern_string(format!(
+                            "{}{}",
+                            self.strings[lhs], self.strings[rhs]
+                        ))),
+                        (UnpackedValue::Float(_), actual) => {
                             return Err(RuntimeError::ExpectedFloat { actual });
                         }
-                        (Value::String(_), actual) => {
+                        (UnpackedValue::String(_), actual) => {
                             return Err(RuntimeError::ExpectedString {
                                 actual,
                             });
@@ -162,21 +164,21 @@ impl<'exe> VirtualMachine<'exe> {
                 Op::Equal => {
                     let rhs = self.pop()?;
                     let lhs = self.pop()?;
-                    self.push(Value::Boolean(rhs == lhs))?;
+                    self.push(Value::boolean(rhs == lhs))?;
                 }
                 Op::Greater => {
-                    let rhs = self.pop()?.float()?;
-                    let lhs = self.pop()?.float()?;
-                    self.push(Value::Boolean(lhs > rhs))?;
+                    let rhs = self.pop()?.as_float();
+                    let lhs = self.pop()?.as_float();
+                    self.push(Value::boolean(lhs > rhs))?;
                 }
                 Op::Less => {
-                    let rhs = self.pop()?.float()?;
-                    let lhs = self.pop()?.float()?;
-                    self.push(Value::Boolean(lhs < rhs))?;
+                    let rhs = self.pop()?.as_float();
+                    let lhs = self.pop()?.as_float();
+                    self.push(Value::boolean(lhs < rhs))?;
                 }
                 Op::Print => {
                     let value = self.pop()?;
-                    self.print_value(&value);
+                    self.print_value(&value)?;
                     println!();
                 }
                 Op::Pop => {
@@ -190,7 +192,7 @@ impl<'exe> VirtualMachine<'exe> {
                     {
                         return Err(RuntimeError::GlobalAlreadyDefined {
                             name: name.clone(),
-                            value: prev,
+                            value: prev.unpack()?,
                         });
                     }
                 }
@@ -205,7 +207,7 @@ impl<'exe> VirtualMachine<'exe> {
                 }
                 Op::SetGlobal { index } | Op::SetGlobalLong { index } => {
                     let name = self.get_variable_name(index)?;
-                    let value = self.pop()?;
+                    let value = self.top()?.clone();
                     let Some(target) = self.globals.get_mut(name) else {
                         return Err(RuntimeError::UndefinedGlobal {
                             name: name.clone(),
@@ -222,7 +224,7 @@ impl<'exe> VirtualMachine<'exe> {
                     self.push(value.clone())?;
                 }
                 Op::SetLocal { index } | Op::SetLocalLong { index } => {
-                    let value = self.last()?.clone();
+                    let value = self.top()?.clone();
                     let Some(target) = self.stack.get_mut(self.fp + index)
                     else {
                         return Err(RuntimeError::LocalVariableOutOfBounds {
@@ -232,17 +234,15 @@ impl<'exe> VirtualMachine<'exe> {
                     *target = value;
                 }
                 Op::JumpIfFalse { distance } => {
-                    if !self.last()?.truthiness() {
+                    if !self.top()?.truthiness() {
                         next_ip += distance;
                     }
                 }
                 Op::Jump { distance } => next_ip += distance,
                 Op::Loop { distance } => next_ip -= distance,
-                // TODO: what if control flow diverges between PushFrame and
-                // Call?
                 Op::PushFrame => {
-                    self.stack.push(Value::FramePointer(self.fp));
-                    self.stack.push(Value::InstructionPointer(0));
+                    self.stack.push(Value::integer(self.fp));
+                    self.stack.push(Value::integer(0));
                 }
                 Op::Call { arity } => {
                     if self.stack.len() <= arity {
@@ -252,13 +252,12 @@ impl<'exe> VirtualMachine<'exe> {
                     self.fp = self.stack.len() - arity - 1;
                     let target = self.stack[self.fp].clone();
 
-                    match target {
-                        Value::Function(index) => {
-                            self.stack[self.fp - 1] =
-                                Value::InstructionPointer(next_ip);
+                    match target.unpack()? {
+                        UnpackedValue::Function(index) => {
+                            self.stack[self.fp - 1] = Value::integer(next_ip);
                             next_ip = self.executable.functions[index].ip;
                         }
-                        Value::NativeFunction(function) => {
+                        UnpackedValue::NativeFunction(function) => {
                             let return_value = self.call_native(function)?;
                             self.pop_frame()?;
                             self.push(return_value)?;
@@ -276,33 +275,37 @@ impl<'exe> VirtualMachine<'exe> {
         Ok(())
     }
 
-    fn print_value(&self, value: &Value) {
-        match value {
-            Value::Float(f) => print!("{f}"),
-            Value::Boolean(b) => print!("{b}"),
-            Value::Nil => print!("<nil>"),
-            Value::String(i) => print!("{}", &self.strings[*i]),
-            Value::Function(i) => {
-                print!("<fun {}>", self.executable.functions[*i].name)
+    fn print_value(&self, value: &Value) -> Result<(), RuntimeError> {
+        match value.unpack()? {
+            UnpackedValue::Float(f) => print!("{f}"),
+            UnpackedValue::Nil => print!("<nil>"),
+            UnpackedValue::False => print!("false"),
+            UnpackedValue::True => print!("true"),
+            UnpackedValue::String(i) => print!("{}", &self.strings[i]),
+            UnpackedValue::Function(i) => {
+                print!("<fun {}>", self.executable.functions[i].name)
             }
-            Value::NativeFunction(f) => print!("<nat {}>", f.name()),
-            Value::FramePointer(fp) => print!("<fp {fp:04x}>"),
-            Value::InstructionPointer(ip) => print!("<ip {ip:04x}>"),
+            UnpackedValue::NativeFunction(f) => print!("<nat {}>", f.name()),
+            UnpackedValue::Integer(fp) => print!("<int {fp:04x}>"),
         }
+
+        Ok(())
     }
 
     #[allow(unused)]
-    fn trace(&self) {
+    fn trace(&self) -> Result<(), RuntimeError> {
         print!("          ");
         for value in &self.stack {
             print!("[");
-            self.print_value(value);
+            self.print_value(value)?;
             print!("]");
         }
         println!();
 
         let mut ip = self.ip;
         self.executable.chunk.disassemble_instruction(&mut ip);
+
+        Ok(())
     }
 
     fn push(&mut self, value: Value) -> Result<(), RuntimeError> {
@@ -317,7 +320,7 @@ impl<'exe> VirtualMachine<'exe> {
         self.stack.pop().ok_or(RuntimeError::StackUnderflow)
     }
 
-    fn last(&self) -> Result<&Value, RuntimeError> {
+    fn top(&self) -> Result<&Value, RuntimeError> {
         self.stack.last().ok_or(RuntimeError::StackUnderflow)
     }
 
@@ -325,8 +328,8 @@ impl<'exe> VirtualMachine<'exe> {
         &mut self,
         f: impl FnOnce(f64) -> f64,
     ) -> Result<(), RuntimeError> {
-        let target = self.pop()?.float()?;
-        self.push(Value::Float(f(target)))?;
+        let target = self.pop()?.as_float();
+        self.push(Value::float(f(target)))?;
         Ok(())
     }
 
@@ -334,9 +337,9 @@ impl<'exe> VirtualMachine<'exe> {
         &mut self,
         f: impl FnOnce(f64, f64) -> f64,
     ) -> Result<(), RuntimeError> {
-        let rhs = self.pop()?.float()?;
-        let lhs = self.pop()?.float()?;
-        self.push(Value::Float(f(lhs, rhs)))?;
+        let rhs = self.pop()?.as_float();
+        let lhs = self.pop()?.as_float();
+        self.push(Value::float(f(lhs, rhs)))?;
         Ok(())
     }
 
@@ -345,16 +348,12 @@ impl<'exe> VirtualMachine<'exe> {
             self.pop()?;
         }
 
-        let Value::InstructionPointer(return_ip) = self.pop()? else {
-            unreachable!();
-        };
-        let Value::FramePointer(return_fp) = self.pop()? else {
-            unreachable!();
-        };
+        let return_ip = self.pop()?.as_integer();
+        let return_fp = self.pop()?.as_integer();
 
-        self.fp = return_fp;
+        self.fp = return_fp as usize;
 
-        Ok(return_ip)
+        Ok(return_ip as usize)
     }
 
     fn call_native(
@@ -362,7 +361,7 @@ impl<'exe> VirtualMachine<'exe> {
         native_function: NativeFunction,
     ) -> Result<Value, RuntimeError> {
         Ok(match native_function {
-            NativeFunction::Clock => Value::Float(
+            NativeFunction::Clock => Value::float(
                 SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64(),
             ),
         })
