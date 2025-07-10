@@ -173,7 +173,11 @@ impl Parser {
         let fun = self.expect()?;
         let function = self.function()?;
 
-        Some(FunDeclStmt { fun, function })
+        Some(FunDeclStmt {
+            function_label: self.decorator.decorate(),
+            fun,
+            function,
+        })
     }
 
     fn class_decl_stmt(&mut self) -> Option<ClassDeclStmt> {
@@ -638,7 +642,7 @@ impl Parser {
                     };
 
                     expr = Expr::Call(CallExpr {
-                        function: Box::new(expr),
+                        target: Box::new(expr),
                         lparen,
                         arguments,
                         rparen,

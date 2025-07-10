@@ -4,13 +4,15 @@ use std::collections::HashMap;
 use hashbrown::{DefaultHashBuilder, HashTable};
 
 use crate::{
-    Chunk, Codec, Constant, Op, RuntimeDiagnostic, RuntimeError, Value,
+    Chunk, Codec, Constant, Executable, Op, RuntimeDiagnostic, RuntimeError,
+    Value,
 };
 
 const MAX_STACK_LEN: usize = 255;
 
-pub struct VirtualMachine<'chunk> {
-    chunk: &'chunk Chunk,
+pub struct VirtualMachine<'exe> {
+    executable: &'exe Executable,
+    chunk: &'exe Chunk,
     last_ip: usize,
     ip: usize,
     stack: Vec<Value>,
@@ -20,10 +22,11 @@ pub struct VirtualMachine<'chunk> {
     globals: HashMap<String, Value>,
 }
 
-impl<'chunk> VirtualMachine<'chunk> {
-    pub fn new(chunk: &'chunk Chunk) -> Self {
+impl<'exe> VirtualMachine<'exe> {
+    pub fn new(executable: &'exe Executable) -> Self {
         Self {
-            chunk,
+            executable,
+            chunk: &executable.main,
             last_ip: 0,
             ip: 0,
             stack: Vec::new(),
@@ -37,7 +40,7 @@ impl<'chunk> VirtualMachine<'chunk> {
     fn get_constant(
         &mut self,
         index: usize,
-    ) -> Result<&'chunk Constant, RuntimeError> {
+    ) -> Result<&'exe Constant, RuntimeError> {
         self.chunk
             .constants()
             .get(index)
@@ -47,7 +50,7 @@ impl<'chunk> VirtualMachine<'chunk> {
     fn get_variable_name(
         &mut self,
         index: usize,
-    ) -> Result<&'chunk String, RuntimeError> {
+    ) -> Result<&'exe String, RuntimeError> {
         let Constant::String(name) = self.get_constant(index)? else {
             return Err(RuntimeError::ExpectedVariableName { index });
         };
@@ -79,6 +82,7 @@ impl<'chunk> VirtualMachine<'chunk> {
         match self.get_constant(index)? {
             Constant::Float(f) => Ok(Value::Float(*f)),
             Constant::String(s) => Ok(Value::String(self.intern_string(s))),
+            Constant::Function(i) => Ok(Value::Function(*i)),
         }
     }
 
@@ -235,6 +239,7 @@ impl<'chunk> VirtualMachine<'chunk> {
             Value::Boolean(b) => b,
             Value::Nil => &"<nil>",
             Value::String(i) => &self.strings[*i],
+            Value::Function(i) => &self.executable.functions[*i],
         }
     }
 

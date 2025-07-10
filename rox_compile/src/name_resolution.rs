@@ -4,8 +4,11 @@ use std::collections::{HashMap, hash_map::Entry};
 use rox_diag::{Span, Spanned as _};
 use rox_lex::token_kind::Identifier;
 use rox_parse::{
-    Ast, LocalsCount, NameResolution, Visit as _,
-    ast::{AssignExpr, BlockStmt, VarDeclStmt, VariableExpr, Visitor, visit},
+    Ast, Dec, LocalsCount, NameResolution, Visit as _,
+    ast::{
+        AssignExpr, BlockStmt, FunDeclStmt, VarDeclStmt, VariableExpr, Visitor,
+        visit,
+    },
 };
 
 use crate::error::CompileError;
@@ -50,46 +53,37 @@ pub struct NameResolutionPass<'ast> {
     scopes: Vec<HashMap<Name<'ast>, usize>>,
     len: usize,
 
-    resolutions: Vec<Resolution>,
-    locals_counts: Vec<usize>,
+    resolutions: Dec<Resolution, NameResolution>,
+    locals_counts: Dec<usize, LocalsCount>,
     errors: Vec<CompileError>,
 }
 
 impl<'ast> NameResolutionPass<'ast> {
-    pub fn new() -> Self {
-        Self {
+    pub fn compile(ast: &'ast Ast) -> NameResolutionOutput {
+        let mut pass = Self {
             globals: HashMap::new(),
             scopes: Vec::new(),
             len: 0,
 
-            resolutions: Vec::new(),
-            locals_counts: Vec::new(),
+            resolutions: Dec::new(&ast.decorator),
+            locals_counts: Dec::new(&ast.decorator),
             errors: Vec::new(),
-        }
-    }
+        };
 
-    pub fn compile(mut self, ast: &'ast Ast) -> NameResolutionOutput {
-        self.resolutions.resize(
-            ast.decorator.count::<NameResolution>(),
-            Resolution::Global,
-        );
-        self.locals_counts
-            .resize(ast.decorator.count::<LocalsCount>(), 0);
+        ast.program.accept(&mut pass);
 
-        ast.program.accept(&mut self);
-
-        for (name, resolution) in self.globals {
+        for (name, resolution) in pass.globals {
             if matches!(resolution, GlobalResolution::Pending) {
-                self.errors.push(CompileError::UndefinedItem {
+                pass.errors.push(CompileError::UndefinedItem {
                     span: name.ident.span(),
                 });
             }
         }
 
         NameResolutionOutput {
-            resolutions: self.resolutions,
-            locals_counts: self.locals_counts,
-            errors: self.errors,
+            resolutions: pass.resolutions.unwrap(),
+            locals_counts: pass.locals_counts.unwrap(),
+            errors: pass.errors,
         }
     }
 
@@ -164,23 +158,17 @@ impl<'ast> NameResolutionPass<'ast> {
     }
 }
 
-impl Default for NameResolutionPass<'_> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl<'ast> Visitor<'ast> for NameResolutionPass<'ast> {
     fn visit_variable_expr(&mut self, node: &'ast VariableExpr) {
-        self.resolutions[node.name_resolution.index()] =
-            self.resolve(&node.ident);
+        let resolution = self.resolve(&node.ident);
+        self.resolutions.insert(&node.name_resolution, resolution);
     }
 
     fn visit_assign_expr(&mut self, node: &'ast AssignExpr) {
         visit::visit_assign_expr(self, node);
 
-        self.resolutions[node.name_resolution.index()] =
-            self.resolve(&node.ident);
+        let resolution = self.resolve(&node.ident);
+        self.resolutions.insert(&node.name_resolution, resolution);
     }
 
     fn visit_var_decl_stmt(&mut self, node: &'ast VarDeclStmt) {
@@ -194,8 +182,27 @@ impl<'ast> Visitor<'ast> for NameResolutionPass<'ast> {
 
         visit::visit_block_stmt(self, node);
 
-        self.locals_counts[node.locals_count.index()] =
-            self.scopes.last().unwrap().len();
+        self.locals_counts
+            .insert(&node.locals_count, self.scopes.last().unwrap().len());
+
+        self.pop_scope();
+    }
+
+    fn visit_fun_decl_stmt(&mut self, node: &'ast FunDeclStmt) {
+        self.define(&node.function.name);
+
+        self.push_scope();
+
+        for param in node.function.params.iter() {
+            self.define(param);
+        }
+
+        visit::visit_block_stmt(self, &node.function.body);
+
+        self.locals_counts.insert(
+            &node.function.body.locals_count,
+            self.scopes.last().unwrap().len(),
+        );
 
         self.pop_scope();
     }

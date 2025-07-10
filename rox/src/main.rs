@@ -9,7 +9,7 @@ use std::{
 use rox_diag::{Diagnostic, Formatter};
 use rox_lex::Lexer;
 use rox_parse::{ParseOutput, Parser};
-use rox_vm::{Chunk, VirtualMachine};
+use rox_vm::{Executable, VirtualMachine};
 
 enum Error {
     Usage,
@@ -67,15 +67,12 @@ fn cli() -> Result<(), Error> {
 fn run_file(path: &Path) -> Result<(), Error> {
     let source = fs::read_to_string(path)?;
 
-    let chunk = compile(&source, Parser::parse)?;
+    let executable = compile(&source, Parser::parse)?;
 
     #[cfg(feature = "trace")]
-    {
-        println!("== {} ==", path.display());
-        chunk.disassemble();
-    }
+    executable.disassemble();
 
-    let mut vm = VirtualMachine::new(&chunk);
+    let mut vm = VirtualMachine::new(&executable);
     if let Err(e) = vm.execute() {
         emit(&source, &e);
         return Err(Error::Execute);
@@ -112,7 +109,7 @@ fn run_repl() -> Result<(), Error> {
 fn compile(
     source: &str,
     parse: impl FnOnce(Parser) -> ParseOutput,
-) -> Result<Chunk, Error> {
+) -> Result<Executable, Error> {
     let lex_output = Lexer::new(source).lex();
 
     for error in &lex_output.errors {

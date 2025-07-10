@@ -9,7 +9,7 @@
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceFolder}/target/debug/rox.exe",
-            "args": ["examples\\for_loop.rox"],
+            "args": ["examples\\functions.rox"],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],

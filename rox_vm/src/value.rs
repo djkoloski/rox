@@ -6,6 +6,7 @@ use crate::RuntimeError;
 pub enum Constant {
     Float(f64),
     String(String),
+    Function(usize),
 }
 
 impl fmt::Display for Constant {
@@ -13,6 +14,7 @@ impl fmt::Display for Constant {
         match self {
             Self::Float(value) => write!(f, "{value}"),
             Self::String(value) => write!(f, "{value}"),
+            Self::Function(index) => write!(f, "<fun {index}>"),
         }
     }
 }
@@ -23,12 +25,13 @@ pub enum Value {
     Boolean(bool),
     Nil,
     String(usize),
+    Function(usize),
 }
 
 impl Value {
     pub fn truthiness(&self) -> bool {
         match self {
-            Self::Float(_) | Self::String(_) => true,
+            Self::Float(_) | Self::String(_) | Self::Function(_) => true,
             Self::Boolean(b) => *b,
             Self::Nil => false,
         }

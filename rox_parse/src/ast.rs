@@ -1,7 +1,8 @@
 use rox_lex::token_kind::*;
 
 use crate::{
-    Decoration, LocalsCount, NameResolution, Punctuated, ast_macro::*,
+    Decoration, FunctionLabel, LocalsCount, NameResolution, Punctuated,
+    ast_macro::*,
 };
 
 token_group! {
@@ -98,7 +99,7 @@ ast! {
     #[accept = visit_call_expr]
     pub struct CallExpr {
         #[visit]
-        pub function: Box<Expr>,
+        pub target: Box<Expr>,
         pub lparen: LeftParen,
         #[visit]
         pub arguments: Punctuated<Expr, Comma>,
@@ -167,6 +168,7 @@ ast! {
 
     #[accept = visit_fun_decl_stmt]
     pub struct FunDeclStmt {
+        pub function_label: Decoration<FunctionLabel>,
         pub fun: Fun,
         #[visit]
         pub function: Function,

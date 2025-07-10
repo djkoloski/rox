@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 
 use rox_diag::Spanned;
+use rox_lex::token_kind::Identifier;
 use rox_parse::{
-    Ast, Visit as _,
+    Visit,
     ast::{
-        AssignExpr, BinaryExpr, BinaryOperator, BlockStmt, ExprStmt, IfStmt,
-        Literal, LiteralExpr, PrintStmt, ReturnStmt, UnaryExpr, UnaryOperator,
-        VarDeclStmt, VariableExpr, Visitor, WhileStmt, visit,
+        AssignExpr, BinaryExpr, BinaryOperator, BlockStmt, ExprStmt,
+        FunDeclStmt, IfStmt, Literal, LiteralExpr, PrintStmt, Program,
+        ReturnStmt, UnaryExpr, UnaryOperator, VarDeclStmt, VariableExpr,
+        Visitor, WhileStmt, visit,
     },
 };
 use rox_vm::{Chunk, Constant, Op};
@@ -39,8 +41,14 @@ impl<'ast> AssemblyPass<'ast> {
         }
     }
 
-    pub fn compile(mut self, ast: &'ast Ast) -> Chunk {
-        ast.program.accept(&mut self);
+    pub fn compile_program(mut self, program: &'ast Program) -> Chunk {
+        program.accept(&mut self);
+
+        self.chunk
+    }
+
+    pub fn compile_function(mut self, fun_decl: &'ast FunDeclStmt) -> Chunk {
+        visit::visit_block_stmt(&mut self, &fun_decl.function.body);
 
         self.chunk
     }
@@ -57,6 +65,18 @@ impl<'ast> AssemblyPass<'ast> {
                 self.chunk.add_constant(Constant::String(string.clone()));
             self.strings.insert(string, index);
             index
+        }
+    }
+
+    fn add_function(&mut self, index: usize) -> usize {
+        self.chunk.add_constant(Constant::Function(index))
+    }
+
+    fn define_if_global(&mut self, identifier: &Identifier) {
+        if self.is_at_global_scope {
+            let index = self.add_string(identifier.value.clone());
+            self.chunk
+                .encode(Op::define_global(index), identifier.span());
         }
     }
 }
@@ -210,11 +230,7 @@ impl<'ast> Visitor<'ast> for AssemblyPass<'ast> {
             self.chunk.encode(Op::Nil, node.var.span());
         }
 
-        if self.is_at_global_scope {
-            let index = self.add_string(node.ident.value.clone());
-            self.chunk
-                .encode(Op::define_global(index), node.ident.span());
-        }
+        self.define_if_global(&node.ident);
     }
 
     fn visit_block_stmt(&mut self, node: &'ast BlockStmt) {
@@ -273,5 +289,11 @@ impl<'ast> Visitor<'ast> for AssemblyPass<'ast> {
 
         self.chunk.patch_jump(to_end);
         self.chunk.encode(Op::Pop, node.while_.span());
+    }
+
+    fn visit_fun_decl_stmt(&mut self, node: &'ast FunDeclStmt) {
+        let index = self.add_function(node.function_label.index());
+        self.chunk.encode(Op::constant(index), node.fun.span());
+        self.define_if_global(&node.function.name);
     }
 }
