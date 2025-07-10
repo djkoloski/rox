@@ -1,4 +1,5 @@
 use core::fmt;
+use std::time::SystemTimeError;
 
 use rox_diag::{Diagnostic, Formatter, Span};
 
@@ -30,12 +31,14 @@ impl Diagnostic for RuntimeDiagnostic {
 
 #[derive(Debug)]
 pub enum RuntimeError {
+    Decode(DecodeError),
+    SystemTimeError(SystemTimeError),
+
     StackOverflow,
     StackUnderflow,
     BytecodeOutOfBounds,
     ConstantOutOfBounds,
     ObjectOutOfBounds,
-    Decode(DecodeError),
     ExpectedFloat { actual: Value },
     ExpectedBoolean { actual: Value },
     ExpectedString { actual: Value },
@@ -54,15 +57,23 @@ impl From<DecodeError> for RuntimeError {
     }
 }
 
+impl From<SystemTimeError> for RuntimeError {
+    fn from(value: SystemTimeError) -> Self {
+        Self::SystemTimeError(value)
+    }
+}
+
 impl fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Decode(e) => write!(f, "decode error: {e}")?,
+            Self::SystemTimeError(e) => write!(f, "system time error: {e}")?,
+
             Self::StackOverflow => write!(f, "stack overflow")?,
             Self::StackUnderflow => write!(f, "stack underflow")?,
             Self::BytecodeOutOfBounds => write!(f, "bytecode out of bounds")?,
             Self::ConstantOutOfBounds => write!(f, "constant out of bounds")?,
             Self::ObjectOutOfBounds => write!(f, "object out of bounds")?,
-            Self::Decode(e) => write!(f, "decode error: {e}")?,
             Self::ExpectedFloat { actual } => {
                 write!(f, "expected float, got {actual:?}")?;
             }

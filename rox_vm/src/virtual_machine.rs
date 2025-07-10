@@ -1,10 +1,14 @@
 use core::hash::BuildHasher;
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use hashbrown::{DefaultHashBuilder, HashTable};
 
 use crate::{
-    Codec, Constant, Executable, Op, RuntimeDiagnostic, RuntimeError, Value,
+    Codec, Constant, Executable, NativeFunction, Op, RuntimeDiagnostic,
+    RuntimeError, Value, global_values,
 };
 
 const MAX_STACK_LEN: usize = 255;
@@ -30,7 +34,7 @@ impl<'exe> VirtualMachine<'exe> {
             hasher: DefaultHashBuilder::default(),
             string_index: HashTable::new(),
             strings: Vec::new(),
-            globals: HashMap::new(),
+            globals: global_values(),
         }
     }
 
@@ -107,21 +111,8 @@ impl<'exe> VirtualMachine<'exe> {
                     }
 
                     let value = self.pop()?;
+                    next_ip = self.pop_frame()?;
 
-                    while self.stack.len() > self.fp {
-                        self.pop()?;
-                    }
-
-                    let Value::InstructionPointer(return_ip) = self.pop()?
-                    else {
-                        unreachable!();
-                    };
-                    let Value::FramePointer(return_fp) = self.pop()? else {
-                        unreachable!();
-                    };
-
-                    next_ip = return_ip;
-                    self.fp = return_fp;
                     self.push(value)?;
                 }
                 Op::Nil => self.push(Value::Nil)?,
@@ -247,6 +238,8 @@ impl<'exe> VirtualMachine<'exe> {
                 }
                 Op::Jump { distance } => next_ip += distance,
                 Op::Loop { distance } => next_ip -= distance,
+                // TODO: what if control flow diverges between PushFrame and
+                // Call?
                 Op::PushFrame => {
                     self.stack.push(Value::FramePointer(self.fp));
                     self.stack.push(Value::InstructionPointer(0));
@@ -257,16 +250,25 @@ impl<'exe> VirtualMachine<'exe> {
                     }
 
                     self.fp = self.stack.len() - arity - 1;
-                    self.stack[self.fp - 1] =
-                        Value::InstructionPointer(next_ip);
+                    let target = self.stack[self.fp].clone();
 
-                    let Value::Function(index) = self.stack[self.fp] else {
-                        return Err(RuntimeError::ExpectedFunction {
-                            actual: self.stack[self.fp].clone(),
-                        });
-                    };
-
-                    next_ip = self.executable.functions[index].ip;
+                    match target {
+                        Value::Function(index) => {
+                            self.stack[self.fp - 1] =
+                                Value::InstructionPointer(next_ip);
+                            next_ip = self.executable.functions[index].ip;
+                        }
+                        Value::NativeFunction(function) => {
+                            let return_value = self.call_native(function)?;
+                            self.pop_frame()?;
+                            self.push(return_value)?;
+                        }
+                        actual => {
+                            return Err(RuntimeError::ExpectedFunction {
+                                actual,
+                            });
+                        }
+                    }
                 }
             }
             self.ip = next_ip;
@@ -283,6 +285,7 @@ impl<'exe> VirtualMachine<'exe> {
             Value::Function(i) => {
                 print!("<fun {}>", self.executable.functions[*i].name)
             }
+            Value::NativeFunction(f) => print!("<nat {}>", f.name()),
             Value::FramePointer(fp) => print!("<fp {fp:04x}>"),
             Value::InstructionPointer(ip) => print!("<ip {ip:04x}>"),
         }
@@ -335,5 +338,33 @@ impl<'exe> VirtualMachine<'exe> {
         let lhs = self.pop()?.float()?;
         self.push(Value::Float(f(lhs, rhs)))?;
         Ok(())
+    }
+
+    fn pop_frame(&mut self) -> Result<usize, RuntimeError> {
+        while self.stack.len() > self.fp {
+            self.pop()?;
+        }
+
+        let Value::InstructionPointer(return_ip) = self.pop()? else {
+            unreachable!();
+        };
+        let Value::FramePointer(return_fp) = self.pop()? else {
+            unreachable!();
+        };
+
+        self.fp = return_fp;
+
+        Ok(return_ip)
+    }
+
+    fn call_native(
+        &mut self,
+        native_function: NativeFunction,
+    ) -> Result<Value, RuntimeError> {
+        Ok(match native_function {
+            NativeFunction::Clock => Value::Float(
+                SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64(),
+            ),
+        })
     }
 }

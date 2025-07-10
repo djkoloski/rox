@@ -20,6 +20,25 @@ impl fmt::Display for Constant {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub enum NativeFunction {
+    Clock,
+}
+
+impl NativeFunction {
+    pub fn arity(&self) -> usize {
+        match self {
+            Self::Clock => 0,
+        }
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Clock => "clock",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Float(f64),
     Boolean(bool),
@@ -28,12 +47,16 @@ pub enum Value {
     Function(usize),
     FramePointer(usize),
     InstructionPointer(usize),
+    NativeFunction(NativeFunction),
 }
 
 impl Value {
     pub fn truthiness(&self) -> bool {
         match self {
-            Self::Float(_) | Self::String(_) | Self::Function(_) => true,
+            Self::Float(_)
+            | Self::String(_)
+            | Self::Function(_)
+            | Self::NativeFunction(_) => true,
             Self::Boolean(b) => *b,
             Self::Nil => false,
             Self::FramePointer(_) | Self::InstructionPointer(_) => {

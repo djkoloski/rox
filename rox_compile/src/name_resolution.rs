@@ -10,6 +10,7 @@ use rox_parse::{
         visit,
     },
 };
+use rox_vm::global_names;
 
 use crate::error::CompileError;
 
@@ -30,13 +31,13 @@ enum GlobalResolution {
     Resolved(Span),
 }
 
-enum Name<'a> {
-    Ident(&'a Identifier),
-    String(&'static str),
+enum Name<'ast> {
+    Ident(&'ast Identifier),
+    String(&'ast str),
 }
 
-impl<'a> Name<'a> {
-    fn as_str(&self) -> &'a str {
+impl<'ast> Name<'ast> {
+    fn as_str(&self) -> &'ast str {
         match self {
             Self::Ident(ident) => &ident.value,
             Self::String(string) => string,
@@ -78,7 +79,14 @@ pub struct NameResolutionPass<'ast> {
 impl<'ast> NameResolutionPass<'ast> {
     pub fn compile(ast: &'ast Ast) -> NameResolutionOutput {
         let mut pass = Self {
-            globals: HashMap::new(),
+            globals: global_names()
+                .map(|string| {
+                    (
+                        Name::String(string),
+                        GlobalResolution::Resolved(Span::null()),
+                    )
+                })
+                .collect(),
             scopes: Vec::new(),
             len: 0,
 

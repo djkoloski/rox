@@ -2,6 +2,7 @@ mod chunk;
 pub mod codec;
 mod error;
 mod executable;
+mod globals;
 mod op;
 pub mod rle;
 mod value;
@@ -12,6 +13,7 @@ pub use self::{
     codec::{Codec, DecodeError},
     error::*,
     executable::*,
+    globals::*,
     op::*,
     value::*,
     virtual_machine::*,
