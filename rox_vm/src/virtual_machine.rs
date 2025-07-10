@@ -13,7 +13,6 @@ const MAX_STACK_LEN: usize = 255;
 pub struct VirtualMachine<'exe> {
     executable: &'exe Executable,
     chunk: &'exe Chunk,
-    last_ip: usize,
     ip: usize,
     stack: Vec<Value>,
     hasher: DefaultHashBuilder,
@@ -27,7 +26,6 @@ impl<'exe> VirtualMachine<'exe> {
         Self {
             executable,
             chunk: &executable.main,
-            last_ip: 0,
             ip: 0,
             stack: Vec::new(),
             hasher: DefaultHashBuilder::default(),
@@ -90,7 +88,7 @@ impl<'exe> VirtualMachine<'exe> {
         if let Err(error) = self.execute_inner() {
             return Err(RuntimeDiagnostic::new(
                 error,
-                self.chunk.span(self.last_ip),
+                self.chunk.span(self.ip),
             ));
         }
         Ok(())
@@ -101,7 +99,8 @@ impl<'exe> VirtualMachine<'exe> {
             #[cfg(feature = "trace")]
             self.trace();
 
-            match self.read_op()? {
+            let mut next_ip = self.ip;
+            match Op::decode(self.chunk.bytes(), &mut next_ip)? {
                 Op::Return => {
                     let value = self.pop()?;
                     println!("{}", self.display(&value));
@@ -223,12 +222,13 @@ impl<'exe> VirtualMachine<'exe> {
                 }
                 Op::JumpIfFalse { distance } => {
                     if !self.last()?.truthiness() {
-                        self.ip += distance;
+                        next_ip += distance;
                     }
                 }
-                Op::Jump { distance } => self.ip += distance,
-                Op::Loop { distance } => self.ip -= distance,
+                Op::Jump { distance } => next_ip += distance,
+                Op::Loop { distance } => next_ip -= distance,
             }
+            self.ip = next_ip;
         }
         Ok(())
     }
@@ -253,11 +253,6 @@ impl<'exe> VirtualMachine<'exe> {
 
         let mut ip = self.ip;
         self.chunk.disassemble_instruction(&mut ip);
-    }
-
-    fn read_op(&mut self) -> Result<Op, RuntimeError> {
-        self.last_ip = self.ip;
-        Ok(Op::decode(self.chunk.bytes(), &mut self.ip)?)
     }
 
     fn push(&mut self, value: Value) -> Result<(), RuntimeError> {
