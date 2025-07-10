@@ -30,64 +30,44 @@ enum GlobalResolution {
     Resolved(Span),
 }
 
-struct Name<'a> {
-    ident: &'a Identifier,
+enum Name<'a> {
+    Ident(&'a Identifier),
+    String(&'static str),
+}
+
+impl<'a> Name<'a> {
+    fn as_str(&self) -> &'a str {
+        match self {
+            Self::Ident(ident) => &ident.value,
+            Self::String(string) => string,
+        }
+    }
+
+    fn span(&self) -> Span {
+        match self {
+            Self::Ident(ident) => ident.span(),
+            Self::String(_) => Span::null(),
+        }
+    }
 }
 
 impl hash::Hash for Name<'_> {
     fn hash<H: hash::Hasher>(&self, state: &mut H) {
-        self.ident.value.hash(state);
+        self.as_str().hash(state);
     }
 }
 
 impl PartialEq for Name<'_> {
     fn eq(&self, other: &Self) -> bool {
-        self.ident.value == other.ident.value
+        self.as_str() == other.as_str()
     }
 }
 
 impl Eq for Name<'_> {}
 
-enum NameOrThis<'a> {
-    Name(&'a Identifier),
-    This,
-}
-
-impl NameOrThis<'_> {
-    fn span(&self) -> Span {
-        match self {
-            Self::Name(name) => name.span(),
-            Self::This => Span::new(0, 0),
-        }
-    }
-}
-
-impl hash::Hash for NameOrThis<'_> {
-    fn hash<H: hash::Hasher>(&self, state: &mut H) {
-        match self {
-            Self::Name(name) => name.value.hash(state),
-            Self::This => "this".hash(state),
-        }
-    }
-}
-
-impl PartialEq for NameOrThis<'_> {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Name(self_name), Self::Name(other_name)) => {
-                self_name.value == other_name.value
-            }
-            (Self::This, Self::This) => true,
-            _ => false,
-        }
-    }
-}
-
-impl Eq for NameOrThis<'_> {}
-
 pub struct NameResolutionPass<'ast> {
     globals: HashMap<Name<'ast>, GlobalResolution>,
-    scopes: Vec<HashMap<NameOrThis<'ast>, usize>>,
+    scopes: Vec<HashMap<Name<'ast>, usize>>,
     len: usize,
 
     resolutions: Dec<Resolution, NameResolution>,
@@ -111,9 +91,8 @@ impl<'ast> NameResolutionPass<'ast> {
 
         for (name, resolution) in pass.globals {
             if matches!(resolution, GlobalResolution::Pending) {
-                pass.errors.push(CompileError::UndefinedItem {
-                    span: name.ident.span(),
-                });
+                pass.errors
+                    .push(CompileError::UndefinedItem { span: name.span() });
             }
         }
 
@@ -134,7 +113,7 @@ impl<'ast> NameResolutionPass<'ast> {
     }
 
     fn define_global(&mut self, ident: &'ast Identifier) {
-        let name = Name { ident };
+        let name = Name::Ident(ident);
         let resolved = GlobalResolution::Resolved(ident.span());
 
         match self.globals.entry(name) {
@@ -155,15 +134,15 @@ impl<'ast> NameResolutionPass<'ast> {
         }
     }
 
-    fn define_local(&mut self, name_or_this: NameOrThis<'ast>) {
+    fn define_local(&mut self, name: Name<'ast>) {
         let scope = self.scopes.last_mut().unwrap();
-        if let Some((original, _)) = scope.get_key_value(&name_or_this) {
+        if let Some((original, _)) = scope.get_key_value(&name) {
             self.errors.push(CompileError::ItemRedefined {
                 original: original.span(),
-                redefinition: name_or_this.span(),
+                redefinition: name.span(),
             });
         } else {
-            scope.insert(name_or_this, self.len);
+            scope.insert(name, self.len);
             self.len += 1;
         }
     }
@@ -172,24 +151,17 @@ impl<'ast> NameResolutionPass<'ast> {
         if self.scopes.is_empty() {
             self.define_global(ident);
         } else {
-            self.define_local(NameOrThis::Name(ident));
+            self.define_local(Name::Ident(ident));
         }
     }
 
-    fn resolve(&mut self, ident: &'ast Identifier) -> Resolution {
-        let name_or_this = if ident.value == "this" {
-            NameOrThis::This
-        } else {
-            NameOrThis::Name(ident)
-        };
-
+    fn resolve(&mut self, name: Name<'ast>) -> Resolution {
         for scope in self.scopes.iter().rev() {
-            if let Some(index) = scope.get(&name_or_this) {
+            if let Some(index) = scope.get(&name) {
                 return Resolution::Local(*index);
             }
         }
 
-        let name = Name { ident };
         if let Entry::Vacant(vacant) = self.globals.entry(name) {
             vacant.insert(GlobalResolution::Pending);
         }
@@ -200,14 +172,14 @@ impl<'ast> NameResolutionPass<'ast> {
 
 impl<'ast> Visitor<'ast> for NameResolutionPass<'ast> {
     fn visit_variable_expr(&mut self, node: &'ast VariableExpr) {
-        let resolution = self.resolve(&node.ident);
+        let resolution = self.resolve(Name::Ident(&node.ident));
         self.resolutions.insert(&node.name_resolution, resolution);
     }
 
     fn visit_assign_expr(&mut self, node: &'ast AssignExpr) {
         visit::visit_assign_expr(self, node);
 
-        let resolution = self.resolve(&node.ident);
+        let resolution = self.resolve(Name::Ident(&node.ident));
         self.resolutions.insert(&node.name_resolution, resolution);
     }
 
@@ -233,7 +205,7 @@ impl<'ast> Visitor<'ast> for NameResolutionPass<'ast> {
 
         self.push_scope();
 
-        self.define_local(NameOrThis::This);
+        self.define_local(Name::String("this"));
 
         for param in node.function.params.iter() {
             self.define(param);

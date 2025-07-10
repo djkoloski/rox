@@ -105,21 +105,15 @@ impl Parser {
             | Token::Return(_)
             | Token::LeftBrace(_) => self.declaration()?,
             _ => Stmt::Print(PrintStmt {
-                print: Print {
-                    span: Span::new(0, 0),
-                },
+                print: Print { span: Span::null() },
                 expr: self.expression()?,
-                semi: Semicolon {
-                    span: Span::new(0, 0),
-                },
+                semi: Semicolon { span: Span::null() },
             }),
         };
 
         Some(Program {
             stmts: vec![stmt],
-            eof: Eof {
-                span: Span::new(0, 0),
-            },
+            eof: Eof { span: Span::null() },
         })
     }
 

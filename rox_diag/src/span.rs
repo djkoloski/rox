@@ -29,6 +29,10 @@ impl Span {
     pub fn get<'t>(&self, source: &'t str) -> &'t str {
         &source[self.start..self.end]
     }
+
+    pub fn null() -> Self {
+        Self::new(0, 0)
+    }
 }
 
 pub trait Spanned {
