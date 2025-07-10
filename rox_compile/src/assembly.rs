@@ -5,7 +5,7 @@ use rox_lex::token_kind::Identifier;
 use rox_parse::{
     Visit,
     ast::{
-        AssignExpr, BinaryExpr, BinaryOperator, BlockStmt, ExprStmt,
+        AssignExpr, BinaryExpr, BinaryOperator, BlockStmt, CallExpr, ExprStmt,
         FunDeclStmt, IfStmt, Literal, LiteralExpr, PrintStmt, Program,
         ReturnStmt, UnaryExpr, UnaryOperator, VarDeclStmt, VariableExpr,
         Visitor, WhileStmt, visit,
@@ -22,13 +22,14 @@ pub struct AssemblyPass<'ast> {
     strings: HashMap<String, usize>,
     is_at_global_scope: bool,
 
-    chunk: Chunk,
+    chunk: &'ast mut Chunk,
 }
 
 impl<'ast> AssemblyPass<'ast> {
     pub fn new(
         resolutions: &'ast Vec<Resolution>,
         locals_counts: &'ast Vec<usize>,
+        chunk: &'ast mut Chunk,
     ) -> Self {
         Self {
             resolutions,
@@ -37,20 +38,24 @@ impl<'ast> AssemblyPass<'ast> {
             strings: HashMap::new(),
             is_at_global_scope: true,
 
-            chunk: Chunk::new(),
+            chunk,
         }
     }
 
-    pub fn compile_program(mut self, program: &'ast Program) -> Chunk {
+    pub fn compile_program(mut self, program: &'ast Program) {
         program.accept(&mut self);
 
-        self.chunk
+        self.chunk.encode(Op::Nil, program.eof.span());
+        self.chunk.encode(Op::Return, program.eof.span());
     }
 
-    pub fn compile_function(mut self, fun_decl: &'ast FunDeclStmt) -> Chunk {
+    pub fn compile_function(mut self, fun_decl: &'ast FunDeclStmt) {
         visit::visit_block_stmt(&mut self, &fun_decl.function.body);
 
         self.chunk
+            .encode(Op::Nil, fun_decl.function.body.rbrace.span());
+        self.chunk
+            .encode(Op::Return, fun_decl.function.body.rbrace.span());
     }
 
     fn add_float(&mut self, float: f64) -> usize {
@@ -270,6 +275,8 @@ impl<'ast> Visitor<'ast> for AssemblyPass<'ast> {
             self.chunk.patch_jump(to_end);
         } else {
             self.chunk.patch_jump(to_false);
+
+            self.chunk.encode(Op::Pop, node.if_.span());
         }
     }
 
@@ -295,5 +302,18 @@ impl<'ast> Visitor<'ast> for AssemblyPass<'ast> {
         let index = self.add_function(node.function_label.index());
         self.chunk.encode(Op::constant(index), node.fun.span());
         self.define_if_global(&node.function.name);
+    }
+
+    fn visit_call_expr(&mut self, node: &'ast CallExpr) {
+        self.chunk.encode(Op::PushFrame, node.span());
+
+        visit::visit_call_expr(self, node);
+
+        self.chunk.encode(
+            Op::Call {
+                arity: node.arguments.len(),
+            },
+            node.span(),
+        );
     }
 }

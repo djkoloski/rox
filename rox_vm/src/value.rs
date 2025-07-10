@@ -26,6 +26,8 @@ pub enum Value {
     Nil,
     String(usize),
     Function(usize),
+    FramePointer(usize),
+    InstructionPointer(usize),
 }
 
 impl Value {
@@ -34,6 +36,9 @@ impl Value {
             Self::Float(_) | Self::String(_) | Self::Function(_) => true,
             Self::Boolean(b) => *b,
             Self::Nil => false,
+            Self::FramePointer(_) | Self::InstructionPointer(_) => {
+                unreachable!()
+            }
         }
     }
 

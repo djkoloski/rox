@@ -1,19 +1,18 @@
-use core::{fmt, hash::BuildHasher};
+use core::hash::BuildHasher;
 use std::collections::HashMap;
 
 use hashbrown::{DefaultHashBuilder, HashTable};
 
 use crate::{
-    Chunk, Codec, Constant, Executable, Op, RuntimeDiagnostic, RuntimeError,
-    Value,
+    Codec, Constant, Executable, Op, RuntimeDiagnostic, RuntimeError, Value,
 };
 
 const MAX_STACK_LEN: usize = 255;
 
 pub struct VirtualMachine<'exe> {
     executable: &'exe Executable,
-    chunk: &'exe Chunk,
     ip: usize,
+    fp: usize,
     stack: Vec<Value>,
     hasher: DefaultHashBuilder,
     string_index: HashTable<usize>,
@@ -25,8 +24,8 @@ impl<'exe> VirtualMachine<'exe> {
     pub fn new(executable: &'exe Executable) -> Self {
         Self {
             executable,
-            chunk: &executable.main,
             ip: 0,
+            fp: 0,
             stack: Vec::new(),
             hasher: DefaultHashBuilder::default(),
             string_index: HashTable::new(),
@@ -39,7 +38,8 @@ impl<'exe> VirtualMachine<'exe> {
         &mut self,
         index: usize,
     ) -> Result<&'exe Constant, RuntimeError> {
-        self.chunk
+        self.executable
+            .chunk
             .constants()
             .get(index)
             .ok_or(RuntimeError::ConstantOutOfBounds)
@@ -88,23 +88,41 @@ impl<'exe> VirtualMachine<'exe> {
         if let Err(error) = self.execute_inner() {
             return Err(RuntimeDiagnostic::new(
                 error,
-                self.chunk.span(self.ip),
+                self.executable.chunk.span(self.ip),
             ));
         }
         Ok(())
     }
 
     fn execute_inner(&mut self) -> Result<(), RuntimeError> {
-        while self.ip < self.chunk.bytes().len() {
+        while self.ip < self.executable.chunk.bytes().len() {
             #[cfg(feature = "trace")]
             self.trace();
 
             let mut next_ip = self.ip;
-            match Op::decode(self.chunk.bytes(), &mut next_ip)? {
+            match Op::decode(self.executable.chunk.bytes(), &mut next_ip)? {
                 Op::Return => {
+                    if self.fp == 0 {
+                        break;
+                    }
+
                     let value = self.pop()?;
-                    println!("{}", self.display(&value));
-                    break;
+
+                    while self.stack.len() > self.fp {
+                        self.pop()?;
+                    }
+
+                    let Value::InstructionPointer(return_ip) = self.pop()?
+                    else {
+                        unreachable!();
+                    };
+                    let Value::FramePointer(return_fp) = self.pop()? else {
+                        unreachable!();
+                    };
+
+                    next_ip = return_ip;
+                    self.fp = return_fp;
+                    self.push(value)?;
                 }
                 Op::Nil => self.push(Value::Nil)?,
                 Op::True => self.push(Value::Boolean(true))?,
@@ -167,7 +185,8 @@ impl<'exe> VirtualMachine<'exe> {
                 }
                 Op::Print => {
                     let value = self.pop()?;
-                    println!("{}", self.display(&value));
+                    self.print_value(&value);
+                    println!();
                 }
                 Op::Pop => {
                     self.pop()?;
@@ -204,7 +223,7 @@ impl<'exe> VirtualMachine<'exe> {
                     *target = value;
                 }
                 Op::GetLocal { index } | Op::GetLocalLong { index } => {
-                    let Some(value) = self.stack.get(index) else {
+                    let Some(value) = self.stack.get(self.fp + index) else {
                         return Err(RuntimeError::LocalVariableOutOfBounds {
                             index,
                         });
@@ -213,7 +232,8 @@ impl<'exe> VirtualMachine<'exe> {
                 }
                 Op::SetLocal { index } | Op::SetLocalLong { index } => {
                     let value = self.last()?.clone();
-                    let Some(target) = self.stack.get_mut(index) else {
+                    let Some(target) = self.stack.get_mut(self.fp + index)
+                    else {
                         return Err(RuntimeError::LocalVariableOutOfBounds {
                             index,
                         });
@@ -227,19 +247,44 @@ impl<'exe> VirtualMachine<'exe> {
                 }
                 Op::Jump { distance } => next_ip += distance,
                 Op::Loop { distance } => next_ip -= distance,
+                Op::PushFrame => {
+                    self.stack.push(Value::FramePointer(self.fp));
+                    self.stack.push(Value::InstructionPointer(0));
+                }
+                Op::Call { arity } => {
+                    if self.stack.len() <= arity {
+                        return Err(RuntimeError::TooFewArguments { arity });
+                    }
+
+                    self.fp = self.stack.len() - arity - 1;
+                    self.stack[self.fp - 1] =
+                        Value::InstructionPointer(next_ip);
+
+                    let Value::Function(index) = self.stack[self.fp] else {
+                        return Err(RuntimeError::ExpectedFunction {
+                            actual: self.stack[self.fp].clone(),
+                        });
+                    };
+
+                    next_ip = self.executable.functions[index].ip;
+                }
             }
             self.ip = next_ip;
         }
         Ok(())
     }
 
-    fn display<'a>(&'a self, value: &'a Value) -> &'a dyn fmt::Display {
+    fn print_value(&self, value: &Value) {
         match value {
-            Value::Float(f) => f,
-            Value::Boolean(b) => b,
-            Value::Nil => &"<nil>",
-            Value::String(i) => &self.strings[*i],
-            Value::Function(i) => &self.executable.functions[*i],
+            Value::Float(f) => print!("{f}"),
+            Value::Boolean(b) => print!("{b}"),
+            Value::Nil => print!("<nil>"),
+            Value::String(i) => print!("{}", &self.strings[*i]),
+            Value::Function(i) => {
+                print!("<fun {}>", self.executable.functions[*i].name)
+            }
+            Value::FramePointer(fp) => print!("<fp {fp:04x}>"),
+            Value::InstructionPointer(ip) => print!("<ip {ip:04x}>"),
         }
     }
 
@@ -247,12 +292,14 @@ impl<'exe> VirtualMachine<'exe> {
     fn trace(&self) {
         print!("          ");
         for value in &self.stack {
-            print!("[{}]", self.display(value));
+            print!("[");
+            self.print_value(value);
+            print!("]");
         }
         println!();
 
         let mut ip = self.ip;
-        self.chunk.disassemble_instruction(&mut ip);
+        self.executable.chunk.disassemble_instruction(&mut ip);
     }
 
     fn push(&mut self, value: Value) -> Result<(), RuntimeError> {

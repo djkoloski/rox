@@ -103,7 +103,7 @@ impl<T, D> Dec<T, D> {
 
         assert!(index < self.cap, "decoration index out-of-bounds");
 
-        let presence_i = index.div_ceil(usize::BITS as usize);
+        let presence_i = index / usize::BITS as usize;
         let presence_b = index % usize::BITS as usize;
 
         let presence_ptr = unsafe { self.presence.as_ptr().add(presence_i) };

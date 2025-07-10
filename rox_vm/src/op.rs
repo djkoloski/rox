@@ -176,7 +176,12 @@ define_ops! {
         Loop {
             #[codec(U16)]
             distance: usize,
-        }
+        },
+        PushFrame,
+        Call {
+            #[codec(U8)]
+            arity: usize,
+        },
     }
 }
 

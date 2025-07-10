@@ -111,7 +111,9 @@ impl Chunk {
             | Op::SetLocalLong { .. }
             | Op::JumpIfFalse { .. }
             | Op::Jump { .. }
-            | Op::Loop { .. } => (),
+            | Op::Loop { .. }
+            | Op::PushFrame
+            | Op::Call { .. } => (),
             Op::Constant { index }
             | Op::ConstantLong { index }
             | Op::DefineGlobal { index }

@@ -41,9 +41,11 @@ pub enum RuntimeError {
     ExpectedString { actual: Value },
     ExpectedFloatOrString { actual: Value },
     ExpectedVariableName { index: usize },
+    ExpectedFunction { actual: Value },
     GlobalAlreadyDefined { name: String, value: Value },
     UndefinedGlobal { name: String },
     LocalVariableOutOfBounds { index: usize },
+    TooFewArguments { arity: usize },
 }
 
 impl From<DecodeError> for RuntimeError {
@@ -76,6 +78,9 @@ impl fmt::Display for RuntimeError {
             Self::ExpectedVariableName { index } => {
                 write!(f, "expected a variable name in constant {index}")?;
             }
+            Self::ExpectedFunction { actual } => {
+                write!(f, "expected function, got {actual:?}")?;
+            }
             Self::GlobalAlreadyDefined { name, value } => {
                 write!(
                     f,
@@ -88,6 +93,12 @@ impl fmt::Display for RuntimeError {
             }
             Self::LocalVariableOutOfBounds { index } => {
                 write!(f, "local variable #{index} was out-of-bounds")?;
+            }
+            Self::TooFewArguments { arity } => {
+                write!(
+                    f,
+                    "too few arguments to call function of arity {arity}"
+                )?;
             }
         }
 

@@ -48,9 +48,46 @@ impl PartialEq for Name<'_> {
 
 impl Eq for Name<'_> {}
 
+enum NameOrThis<'a> {
+    Name(&'a Identifier),
+    This,
+}
+
+impl NameOrThis<'_> {
+    fn span(&self) -> Span {
+        match self {
+            Self::Name(name) => name.span(),
+            Self::This => Span::new(0, 0),
+        }
+    }
+}
+
+impl hash::Hash for NameOrThis<'_> {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        match self {
+            Self::Name(name) => name.value.hash(state),
+            Self::This => "this".hash(state),
+        }
+    }
+}
+
+impl PartialEq for NameOrThis<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Name(self_name), Self::Name(other_name)) => {
+                self_name.value == other_name.value
+            }
+            (Self::This, Self::This) => true,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for NameOrThis<'_> {}
+
 pub struct NameResolutionPass<'ast> {
     globals: HashMap<Name<'ast>, GlobalResolution>,
-    scopes: Vec<HashMap<Name<'ast>, usize>>,
+    scopes: Vec<HashMap<NameOrThis<'ast>, usize>>,
     len: usize,
 
     resolutions: Dec<Resolution, NameResolution>,
@@ -118,17 +155,15 @@ impl<'ast> NameResolutionPass<'ast> {
         }
     }
 
-    fn define_local(&mut self, ident: &'ast Identifier) {
-        let name = Name { ident };
-
+    fn define_local(&mut self, name_or_this: NameOrThis<'ast>) {
         let scope = self.scopes.last_mut().unwrap();
-        if let Some((original, _)) = scope.get_key_value(&name) {
+        if let Some((original, _)) = scope.get_key_value(&name_or_this) {
             self.errors.push(CompileError::ItemRedefined {
-                original: original.ident.span(),
-                redefinition: ident.span(),
+                original: original.span(),
+                redefinition: name_or_this.span(),
             });
         } else {
-            scope.insert(name, self.len);
+            scope.insert(name_or_this, self.len);
             self.len += 1;
         }
     }
@@ -137,19 +172,24 @@ impl<'ast> NameResolutionPass<'ast> {
         if self.scopes.is_empty() {
             self.define_global(ident);
         } else {
-            self.define_local(ident);
+            self.define_local(NameOrThis::Name(ident));
         }
     }
 
     fn resolve(&mut self, ident: &'ast Identifier) -> Resolution {
-        let name = Name { ident };
+        let name_or_this = if ident.value == "this" {
+            NameOrThis::This
+        } else {
+            NameOrThis::Name(ident)
+        };
 
         for scope in self.scopes.iter().rev() {
-            if let Some(index) = scope.get(&name) {
+            if let Some(index) = scope.get(&name_or_this) {
                 return Resolution::Local(*index);
             }
         }
 
+        let name = Name { ident };
         if let Entry::Vacant(vacant) = self.globals.entry(name) {
             vacant.insert(GlobalResolution::Pending);
         }
@@ -192,6 +232,8 @@ impl<'ast> Visitor<'ast> for NameResolutionPass<'ast> {
         self.define(&node.function.name);
 
         self.push_scope();
+
+        self.define_local(NameOrThis::This);
 
         for param in node.function.params.iter() {
             self.define(param);
