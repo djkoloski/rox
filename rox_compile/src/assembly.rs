@@ -43,6 +43,8 @@ impl<'ast> AssemblyPass<'ast> {
     }
 
     pub fn compile_program(mut self, program: &'ast Program) {
+        self.is_at_global_scope = true;
+
         program.accept(&mut self);
 
         self.chunk.encode(Op::Nil, program.eof.span());
@@ -50,6 +52,8 @@ impl<'ast> AssemblyPass<'ast> {
     }
 
     pub fn compile_function(mut self, fun_decl: &'ast FunDeclStmt) {
+        self.is_at_global_scope = false;
+
         visit::visit_block_stmt(&mut self, &fun_decl.function.body);
 
         self.chunk
