@@ -7,7 +7,7 @@ use crate::{Decoration, DecorationKind, Decorator};
 
 type Presence = usize;
 
-pub struct Dec<T, D> {
+pub struct Dec<D, T> {
     len: usize,
     cap: usize,
     presence: NonNull<Presence>,
@@ -15,7 +15,7 @@ pub struct Dec<T, D> {
     _phantom: PhantomData<D>,
 }
 
-impl<T, D> Drop for Dec<T, D> {
+impl<D, T> Drop for Dec<D, T> {
     fn drop(&mut self) {
         if self.cap == 0 {
             return;
@@ -50,7 +50,7 @@ impl<T, D> Drop for Dec<T, D> {
     }
 }
 
-impl<T, D> Dec<T, D> {
+impl<D, T> Dec<D, T> {
     fn presence_layout(cap: usize) -> Layout {
         let presence_cap = cap.div_ceil(Presence::BITS as usize);
         Layout::array::<Presence>(presence_cap).unwrap()
@@ -98,32 +98,65 @@ impl<T, D> Dec<T, D> {
         }
     }
 
-    pub fn insert(&mut self, decoration: &Decoration<D>, value: T) {
-        let index = decoration.index();
-
+    fn get_presence(&self, index: usize) -> (*mut Presence, Presence) {
         assert!(index < self.cap, "decoration index out-of-bounds");
 
-        let presence_i = index / usize::BITS as usize;
-        let presence_b = index % usize::BITS as usize;
+        let word = index / usize::BITS as usize;
+        let bit = index % usize::BITS as usize;
+        let mask = 1 << bit;
+        let ptr = unsafe { self.presence.as_ptr().add(word) };
 
-        let presence_ptr = unsafe { self.presence.as_ptr().add(presence_i) };
-        let presence_mask = 1 << presence_b;
+        (ptr, mask)
+    }
 
-        let presence = unsafe { presence_ptr.read() };
+    fn is_present(&self, index: usize) -> bool {
+        let (ptr, mask) = self.get_presence(index);
+        let presence = unsafe { ptr.read() };
+        presence & mask != 0
+    }
 
+    pub fn insert(&mut self, decoration: Decoration<D>, value: T) {
+        let index = decoration.index();
+
+        let (ptr, mask) = self.get_presence(index);
+        let presence = unsafe { ptr.read() };
         assert_eq!(
-            presence & presence_mask,
+            presence & mask,
             0,
             "a value with the decoration index {index} was already inserted",
         );
 
         unsafe {
-            presence_ptr.write(presence | presence_mask);
+            ptr.write(presence | mask);
         }
         unsafe {
             self.elements.as_ptr().add(index).write(value);
         }
         self.len += 1;
+    }
+
+    pub fn get(&self, decoration: Decoration<D>) -> Option<&T> {
+        let index = decoration.index();
+
+        assert!(
+            self.is_present(index),
+            "a value with the decoration index {index} was not already \
+             inserted"
+        );
+
+        unsafe { Some(self.elements.add(index).as_ref()) }
+    }
+
+    pub fn get_mut(&mut self, decoration: Decoration<D>) -> Option<&mut T> {
+        let index = decoration.index();
+
+        assert!(
+            self.is_present(index),
+            "a value with the decoration index {index} was not already \
+             inserted"
+        );
+
+        unsafe { Some(self.elements.add(index).as_mut()) }
     }
 
     pub fn unwrap(self) -> Vec<T> {

@@ -108,11 +108,11 @@ define_ops! {
         False,
         Constant {
             #[codec(U8)]
-            index: usize,
+            constant_index: usize,
         },
         ConstantLong {
             #[codec(U24)]
-            index: usize,
+            constant_index: usize,
         },
         Not,
         Negate,
@@ -127,43 +127,43 @@ define_ops! {
         Pop,
         DefineGlobal {
             #[codec(U8)]
-            index: usize,
+            constant_index: usize,
         },
         DefineGlobalLong {
             #[codec(U24)]
-            index: usize,
+            constant_index: usize,
         },
         GetGlobal {
             #[codec(U8)]
-            index: usize,
+            constant_index: usize,
         },
         GetGlobalLong {
             #[codec(U24)]
-            index: usize,
+            constant_index: usize,
         },
         SetGlobal {
             #[codec(U8)]
-            index: usize,
+            constant_index: usize,
         },
         SetGlobalLong {
             #[codec(U24)]
-            index: usize,
+            constant_index: usize,
         },
         GetLocal {
             #[codec(U8)]
-            index: usize,
+            local_index: usize,
         },
         GetLocalLong {
             #[codec(U24)]
-            index: usize,
+            local_index: usize,
         },
         SetLocal {
             #[codec(U8)]
-            index: usize,
+            local_index: usize,
         },
         SetLocalLong {
             #[codec(U24)]
-            index: usize,
+            local_index: usize,
         },
         JumpIfFalse {
             #[codec(U16)]
@@ -182,26 +182,51 @@ define_ops! {
             #[codec(U8)]
             arity: usize,
         },
+        CloseFunction {
+            #[codec(U8)]
+            function_index: usize,
+        },
+        CloseFunctionLong {
+            #[codec(U24)]
+            function_index: usize,
+        },
+        CloseLocal,
+        GetUpvalue {
+            #[codec(U8)]
+            upvalue_index: usize,
+        },
+        GetUpvalueLong {
+            #[codec(U24)]
+            upvalue_index: usize,
+        },
+        SetUpvalue {
+            #[codec(U8)]
+            upvalue_index: usize,
+        },
+        SetUpvalueLong {
+            #[codec(U24)]
+            upvalue_index: usize,
+        },
     }
 }
 
 macro_rules! long_ops {
-    ($($fn:ident: $short:ident $long:ident),* $(,)?) => {
+    ($($fn:ident: $field:ident => $short:ident, $long:ident);* $(;)?) => {
         impl Op {
             $(
-                pub fn $fn(index: usize) -> Self {
-                    if index <= U8::MAX {
-                        Self::$short { index }
-                    } else if index <= U24::MAX {
-                        Self::$long { index }
+                pub fn $fn($field: usize) -> Self {
+                    if $field <= U8::MAX {
+                        Self::$short { $field }
+                    } else if $field <= U24::MAX {
+                        Self::$long { $field }
                     } else {
                         panic!(
                             ::core::concat!(
                                 "attempted to encode a ",
                                 ::core::stringify!($fn),
-                                " op with an index that was too large ({})",
+                                " op with an argument that was too large ({})",
                             ),
-                            index,
+                            $field,
                         );
                     }
                 }
@@ -211,10 +236,13 @@ macro_rules! long_ops {
 }
 
 long_ops! {
-    constant: Constant ConstantLong,
-    define_global: DefineGlobal DefineGlobalLong,
-    get_global: GetGlobal GetGlobalLong,
-    set_global: SetGlobal SetGlobalLong,
-    get_local: GetLocal GetLocalLong,
-    set_local: SetLocal SetLocalLong,
+    constant: constant_index => Constant, ConstantLong;
+    define_global: constant_index => DefineGlobal, DefineGlobalLong;
+    get_global: constant_index => GetGlobal, GetGlobalLong;
+    set_global: constant_index => SetGlobal, SetGlobalLong;
+    get_local: local_index => GetLocal, GetLocalLong;
+    set_local: local_index => SetLocal, SetLocalLong;
+    close_function: function_index => CloseFunction, CloseFunctionLong;
+    get_upvalue: upvalue_index => GetUpvalue, GetUpvalueLong;
+    set_upvalue: upvalue_index => SetUpvalue, SetUpvalueLong;
 }

@@ -6,18 +6,18 @@ use rox_parse::{
     Visit,
     ast::{
         AssignExpr, BinaryExpr, BinaryOperator, BlockStmt, CallExpr, ExprStmt,
-        FunDeclStmt, IfStmt, Literal, LiteralExpr, PrintStmt, Program,
-        ReturnStmt, UnaryExpr, UnaryOperator, VarDeclStmt, VariableExpr,
-        Visitor, WhileStmt, visit,
+        FunDeclStmt, Function, IfStmt, Literal, LiteralExpr, PrintStmt,
+        Program, ReturnStmt, UnaryExpr, UnaryOperator, VarDeclStmt,
+        VariableExpr, Visitor, WhileStmt, visit,
     },
 };
 use rox_vm::{Chunk, Constant, Op};
 
-use crate::Resolution;
+use crate::{LocalDeclaration, Resolution};
 
 pub struct AssemblyPass<'ast> {
     resolutions: &'ast Vec<Resolution>,
-    locals_counts: &'ast Vec<usize>,
+    block_locals: &'ast Vec<Vec<LocalDeclaration>>,
 
     strings: HashMap<String, usize>,
     is_at_global_scope: bool,
@@ -28,12 +28,12 @@ pub struct AssemblyPass<'ast> {
 impl<'ast> AssemblyPass<'ast> {
     pub fn new(
         resolutions: &'ast Vec<Resolution>,
-        locals_counts: &'ast Vec<usize>,
+        block_locals: &'ast Vec<Vec<LocalDeclaration>>,
         chunk: &'ast mut Chunk,
     ) -> Self {
         Self {
             resolutions,
-            locals_counts,
+            block_locals,
 
             strings: HashMap::new(),
             is_at_global_scope: true,
@@ -51,15 +51,13 @@ impl<'ast> AssemblyPass<'ast> {
         self.chunk.encode(Op::Return, program.eof.span());
     }
 
-    pub fn compile_function(mut self, fun_decl: &'ast FunDeclStmt) {
+    pub fn compile_function(mut self, function: &'ast Function) {
         self.is_at_global_scope = false;
 
-        visit::visit_block_stmt(&mut self, &fun_decl.function.body);
+        visit::visit_block_stmt(&mut self, &function.body);
 
-        self.chunk
-            .encode(Op::Nil, fun_decl.function.body.rbrace.span());
-        self.chunk
-            .encode(Op::Return, fun_decl.function.body.rbrace.span());
+        self.chunk.encode(Op::Nil, function.body.rbrace.span());
+        self.chunk.encode(Op::Return, function.body.rbrace.span());
     }
 
     fn add_float(&mut self, float: f64) -> usize {
@@ -67,25 +65,21 @@ impl<'ast> AssemblyPass<'ast> {
     }
 
     fn add_string(&mut self, string: String) -> usize {
-        if let Some(index) = self.strings.get(&string) {
-            *index
+        if let Some(constant_index) = self.strings.get(&string) {
+            *constant_index
         } else {
-            let index =
+            let constant_index =
                 self.chunk.add_constant(Constant::String(string.clone()));
-            self.strings.insert(string, index);
-            index
+            self.strings.insert(string, constant_index);
+            constant_index
         }
-    }
-
-    fn add_function(&mut self, index: usize) -> usize {
-        self.chunk.add_constant(Constant::Function(index))
     }
 
     fn define_if_global(&mut self, identifier: &Identifier) {
         if self.is_at_global_scope {
-            let index = self.add_string(identifier.value.clone());
+            let constant_index = self.add_string(identifier.value.clone());
             self.chunk
-                .encode(Op::define_global(index), identifier.span());
+                .encode(Op::define_global(constant_index), identifier.span());
         }
     }
 }
@@ -96,12 +90,12 @@ impl<'ast> Visitor<'ast> for AssemblyPass<'ast> {
 
         match &node.literal {
             Literal::Float(n) => {
-                let index = self.add_float(n.value);
-                self.chunk.encode(Op::constant(index), node.span());
+                let constant_index = self.add_float(n.value);
+                self.chunk.encode(Op::constant(constant_index), node.span());
             }
             Literal::String(s) => {
-                let index = self.add_string(s.value.clone());
-                self.chunk.encode(Op::constant(index), node.span());
+                let constant_index = self.add_string(s.value.clone());
+                self.chunk.encode(Op::constant(constant_index), node.span());
             }
             Literal::Nil(_) => self.chunk.encode(Op::Nil, node.span()),
             Literal::True(_) => self.chunk.encode(Op::True, node.span()),
@@ -195,13 +189,20 @@ impl<'ast> Visitor<'ast> for AssemblyPass<'ast> {
     }
 
     fn visit_variable_expr(&mut self, node: &'ast VariableExpr) {
-        match self.resolutions[node.name_resolution.index()] {
-            Resolution::Local(index) => {
-                self.chunk.encode(Op::get_local(index), node.ident.span());
+        match self.resolutions[node.name.decoration.index()] {
+            Resolution::Local { local_index } => {
+                self.chunk
+                    .encode(Op::get_local(local_index), node.name.span());
+            }
+            Resolution::Upvalue { upvalue_index } => {
+                self.chunk
+                    .encode(Op::get_upvalue(upvalue_index), node.name.span());
             }
             Resolution::Global => {
-                let index = self.add_string(node.ident.value.clone());
-                self.chunk.encode(Op::get_global(index), node.ident.span());
+                let constant_index =
+                    self.add_string(node.name.identifier.value.clone());
+                self.chunk
+                    .encode(Op::get_global(constant_index), node.name.span());
             }
         }
     }
@@ -209,13 +210,20 @@ impl<'ast> Visitor<'ast> for AssemblyPass<'ast> {
     fn visit_assign_expr(&mut self, node: &'ast AssignExpr) {
         visit::visit_assign_expr(self, node);
 
-        match self.resolutions[node.name_resolution.index()] {
-            Resolution::Local(index) => {
-                self.chunk.encode(Op::set_local(index), node.ident.span());
+        match self.resolutions[node.name.decoration.index()] {
+            Resolution::Local { local_index } => {
+                self.chunk
+                    .encode(Op::set_local(local_index), node.name.span());
+            }
+            Resolution::Upvalue { upvalue_index } => {
+                self.chunk
+                    .encode(Op::set_upvalue(upvalue_index), node.name.span());
             }
             Resolution::Global => {
-                let index = self.add_string(node.ident.value.clone());
-                self.chunk.encode(Op::set_global(index), node.equal.span());
+                let constant_index =
+                    self.add_string(node.name.identifier.value.clone());
+                self.chunk
+                    .encode(Op::set_global(constant_index), node.equal.span());
             }
         }
     }
@@ -239,7 +247,7 @@ impl<'ast> Visitor<'ast> for AssemblyPass<'ast> {
             self.chunk.encode(Op::Nil, node.var.span());
         }
 
-        self.define_if_global(&node.ident);
+        self.define_if_global(&node.identifier);
     }
 
     fn visit_block_stmt(&mut self, node: &'ast BlockStmt) {
@@ -248,8 +256,15 @@ impl<'ast> Visitor<'ast> for AssemblyPass<'ast> {
 
         visit::visit_block_stmt(self, node);
 
-        for _ in 0..self.locals_counts[node.locals_count.index()] {
-            self.chunk.encode(Op::Pop, node.rbrace.span());
+        for local in self.block_locals[node.decoration.index()].iter().rev() {
+            match local {
+                LocalDeclaration::Local => {
+                    self.chunk.encode(Op::Pop, node.rbrace.span())
+                }
+                LocalDeclaration::Capture => {
+                    self.chunk.encode(Op::CloseLocal, node.rbrace.span())
+                }
+            }
         }
 
         self.is_at_global_scope = was_at_global_scope;
@@ -303,9 +318,11 @@ impl<'ast> Visitor<'ast> for AssemblyPass<'ast> {
     }
 
     fn visit_fun_decl_stmt(&mut self, node: &'ast FunDeclStmt) {
-        let index = self.add_function(node.function_label.index());
-        self.chunk.encode(Op::constant(index), node.fun.span());
-        self.define_if_global(&node.function.name);
+        self.chunk.encode(
+            Op::close_function(node.function.decoration.index()),
+            node.fun.span(),
+        );
+        self.define_if_global(&node.identifier);
     }
 
     fn visit_call_expr(&mut self, node: &'ast CallExpr) {

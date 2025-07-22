@@ -1,8 +1,8 @@
 use rox_lex::token_kind::*;
 
 use crate::{
-    Decoration, FunctionLabel, LocalsCount, NameResolution, Punctuated,
-    ast_macro::*,
+    BlockDecoration, Decoration, FunctionDecoration, NameDecoration,
+    Punctuated, ast_macro::*,
 };
 
 token_group! {
@@ -36,6 +36,11 @@ token_group! {
 }
 
 ast! {
+    pub struct Name {
+        pub decoration: Decoration<NameDecoration>,
+        pub identifier: Identifier,
+    }
+
     // Expr
 
     pub enum Expr {
@@ -83,14 +88,12 @@ ast! {
 
     #[accept = visit_variable_expr]
     pub struct VariableExpr {
-        pub name_resolution: Decoration<NameResolution>,
-        pub ident: Identifier,
+        pub name: Name,
     }
 
     #[accept = visit_assign_expr]
     pub struct AssignExpr {
-        pub name_resolution: Decoration<NameResolution>,
-        pub ident: Identifier,
+        pub name: Name,
         pub equal: Equal,
         #[visit]
         pub expr: Box<Expr>,
@@ -111,7 +114,7 @@ ast! {
         #[visit]
         pub target: Box<Expr>,
         pub dot: Dot,
-        pub name: Identifier,
+        pub field: Identifier,
     }
 
     #[accept = visit_set_expr]
@@ -119,7 +122,7 @@ ast! {
         #[visit]
         pub target: Box<Expr>,
         pub dot: Dot,
-        pub name: Identifier,
+        pub field: Identifier,
         pub equal: Equal,
         #[visit]
         pub expr: Box<Expr>,
@@ -134,7 +137,7 @@ ast! {
     pub struct SuperExpr {
         pub super_: Super,
         pub dot: Dot,
-        pub name: Identifier,
+        pub field: Identifier,
     }
 
     // Stmt
@@ -154,7 +157,7 @@ ast! {
     #[accept = visit_var_decl_stmt]
     pub struct VarDeclStmt {
         pub var: Var,
-        pub ident: Identifier,
+        pub identifier: Identifier,
         #[visit]
         pub assignment: Option<Assignment>,
         pub semi: Semicolon,
@@ -168,8 +171,8 @@ ast! {
 
     #[accept = visit_fun_decl_stmt]
     pub struct FunDeclStmt {
-        pub function_label: Decoration<FunctionLabel>,
         pub fun: Fun,
+        pub identifier: Identifier,
         #[visit]
         pub function: Function,
     }
@@ -177,22 +180,26 @@ ast! {
     #[accept = visit_class_decl_stmt]
     pub struct ClassDeclStmt {
         pub class: Class,
-        pub name: Identifier,
+        pub identifier: Identifier,
         pub inheritance: Option<Inheritance>,
         pub lbrace: LeftBrace,
         #[visit]
-        pub methods: Vec<Function>,
+        pub methods: Vec<Method>,
         pub rbrace: RightBrace,
+    }
+
+    pub struct Method {
+        pub identifier: Identifier,
+        pub function: Function,
     }
 
     pub struct Inheritance {
         pub less: Less,
-        // pub name_resolution: Decoration<NameResolution>,
-        pub superclass: Identifier,
+        pub superclass: Name,
     }
 
     pub struct Function {
-        pub name: Identifier,
+        pub decoration: Decoration<FunctionDecoration>,
         pub lparen: LeftParen,
         pub params: Punctuated<Identifier, Comma>,
         pub rparen: RightParen,
@@ -217,7 +224,7 @@ ast! {
 
     #[accept = visit_block_stmt]
     pub struct BlockStmt {
-        pub locals_count: Decoration<LocalsCount>,
+        pub decoration: Decoration<BlockDecoration>,
         pub lbrace: LeftBrace,
         #[visit]
         pub stmts: Vec<Stmt>,

@@ -9,8 +9,9 @@ use crate::{
         AssignExpr, Assignment, BinaryExpr, BinaryOperator, BlockStmt,
         CallExpr, ClassDeclStmt, ElseClause, Expr, ExprStmt, FunDeclStmt,
         Function, GetExpr, GroupingExpr, IfStmt, Inheritance, Literal,
-        LiteralExpr, PrintStmt, Program, ReturnStmt, SetExpr, Stmt, SuperExpr,
-        ThisExpr, UnaryExpr, VarDeclStmt, VariableExpr, WhileStmt,
+        LiteralExpr, Method, Name, PrintStmt, Program, ReturnStmt, SetExpr,
+        Stmt, SuperExpr, ThisExpr, UnaryExpr, VarDeclStmt, VariableExpr,
+        WhileStmt,
     },
 };
 
@@ -79,6 +80,13 @@ impl Parser {
         T::from_token(self.advance())
     }
 
+    fn name(&mut self, identifier: Identifier) -> Name {
+        Name {
+            decoration: self.decorator.decorate(),
+            identifier,
+        }
+    }
+
     fn program(&mut self) -> Option<Program> {
         let mut stmts = Vec::new();
 
@@ -128,7 +136,7 @@ impl Parser {
 
     fn var_decl_stmt(&mut self) -> Option<VarDeclStmt> {
         let var = self.expect::<Var>()?;
-        let Some(ident) = self.expect() else {
+        let Some(identifier) = self.expect() else {
             self.errors
                 .push(ParseError::ExpectedIdent(self.peek().span()));
             return None;
@@ -145,7 +153,7 @@ impl Parser {
             let stmt = if let Some(Assignment { expr, .. }) = &assignment {
                 Span::across(&var, expr)
             } else {
-                Span::across(&var, &ident)
+                Span::across(&var, &identifier)
             };
 
             self.errors.push(ParseError::UnterminatedStatement {
@@ -157,7 +165,7 @@ impl Parser {
 
         Some(VarDeclStmt {
             var,
-            ident,
+            identifier,
             assignment,
             semi,
         })
@@ -165,18 +173,25 @@ impl Parser {
 
     fn fun_decl_stmt(&mut self) -> Option<FunDeclStmt> {
         let fun = self.expect()?;
+
+        let Some(identifier) = self.expect() else {
+            self.errors
+                .push(ParseError::ExpectedIdent(self.peek().span()));
+            return None;
+        };
+
         let function = self.function()?;
 
         Some(FunDeclStmt {
-            function_label: self.decorator.decorate(),
             fun,
+            identifier,
             function,
         })
     }
 
     fn class_decl_stmt(&mut self) -> Option<ClassDeclStmt> {
         let class = self.expect()?;
-        let Some(name) = self.expect() else {
+        let Some(identifier) = self.expect() else {
             self.errors
                 .push(ParseError::ExpectedIdent(self.peek().span()));
             return None;
@@ -189,7 +204,10 @@ impl Parser {
                     .push(ParseError::ExpectedIdent(self.peek().span()));
                 return None;
             };
-            inheritance = Some(Inheritance { less, superclass });
+            inheritance = Some(Inheritance {
+                less,
+                superclass: self.name(superclass),
+            });
         }
 
         let Some(lbrace) = self.expect::<LeftBrace>() else {
@@ -200,7 +218,17 @@ impl Parser {
 
         let mut methods = Vec::new();
         while !matches!(self.peek(), Token::RightBrace(_)) {
-            methods.push(self.function()?);
+            let Some(identifier) = self.expect() else {
+                self.errors
+                    .push(ParseError::ExpectedIdent(self.peek().span()));
+                return None;
+            };
+            let function = self.function()?;
+
+            methods.push(Method {
+                identifier,
+                function,
+            });
         }
 
         let Some(rbrace) = self.expect() else {
@@ -213,7 +241,7 @@ impl Parser {
 
         Some(ClassDeclStmt {
             class,
-            name,
+            identifier,
             inheritance,
             lbrace,
             methods,
@@ -222,12 +250,6 @@ impl Parser {
     }
 
     fn function(&mut self) -> Option<Function> {
-        let Some(name) = self.expect() else {
-            self.errors
-                .push(ParseError::ExpectedIdent(self.peek().span()));
-            return None;
-        };
-
         let Some(lparen) = self.expect::<LeftParen>() else {
             self.errors
                 .push(ParseError::ExpectedLeftParen(self.peek().span()));
@@ -261,7 +283,7 @@ impl Parser {
         let body = self.block_stmt()?;
 
         Some(Function {
-            name,
+            decoration: self.decorator.decorate(),
             lparen,
             params,
             rparen,
@@ -392,7 +414,7 @@ impl Parser {
         let mut body = self.statement()?;
         if let Some(increment) = increment {
             body = Stmt::Block(BlockStmt {
-                locals_count: self.decorator.decorate(),
+                decoration: self.decorator.decorate(),
                 lbrace: LeftBrace { span: for_.span() },
                 stmts: vec![
                     body,
@@ -421,7 +443,7 @@ impl Parser {
         );
 
         Some(Stmt::Block(BlockStmt {
-            locals_count: self.decorator.decorate(),
+            decoration: self.decorator.decorate(),
             lbrace: LeftBrace { span: for_.span() },
             stmts,
             rbrace: RightBrace { span: for_.span() },
@@ -467,7 +489,7 @@ impl Parser {
         let rbrace = self.expect()?;
 
         Some(BlockStmt {
-            locals_count: self.decorator.decorate(),
+            decoration: self.decorator.decorate(),
             lbrace,
             stmts,
             rbrace,
@@ -498,24 +520,22 @@ impl Parser {
             let value = self.assignment()?;
 
             match expr {
-                Expr::Get(GetExpr { target, dot, name }) => {
+                Expr::Get(GetExpr { target, dot, field }) => {
                     Some(Expr::Set(SetExpr {
                         target,
                         dot,
+                        field,
+                        equal,
+                        expr: Box::new(value),
+                    }))
+                }
+                Expr::Variable(VariableExpr { name }) => {
+                    Some(Expr::Assign(AssignExpr {
                         name,
                         equal,
                         expr: Box::new(value),
                     }))
                 }
-                Expr::Variable(VariableExpr {
-                    name_resolution,
-                    ident,
-                }) => Some(Expr::Assign(AssignExpr {
-                    name_resolution,
-                    ident,
-                    equal,
-                    expr: Box::new(value),
-                })),
                 _ => {
                     self.errors
                         .push(ParseError::InvalidAssignmentTarget(expr.span()));
@@ -644,7 +664,7 @@ impl Parser {
                 }
                 Token::Dot(_) => {
                     let dot = self.assume::<Dot>();
-                    let Some(name) = self.expect() else {
+                    let Some(field) = self.expect() else {
                         self.errors.push(ParseError::ExpectedIdent(
                             self.peek().span(),
                         ));
@@ -654,7 +674,7 @@ impl Parser {
                     expr = Expr::Get(GetExpr {
                         target: Box::new(expr),
                         dot,
-                        name,
+                        field,
                     });
                 }
                 _ => break,
@@ -674,10 +694,12 @@ impl Parser {
                 literal: self.assume(),
             })),
             Token::LeftParen(_) => self.grouped().map(Expr::Grouping),
-            Token::Identifier(_) => Some(Expr::Variable(VariableExpr {
-                name_resolution: self.decorator.decorate(),
-                ident: self.assume(),
-            })),
+            Token::Identifier(_) => {
+                let identifier = self.assume();
+                Some(Expr::Variable(VariableExpr {
+                    name: self.name(identifier),
+                }))
+            }
             Token::This(_) => Some(Expr::This(ThisExpr {
                 this: self.assume(),
             })),
@@ -688,12 +710,12 @@ impl Parser {
                         .push(ParseError::ExpectedDot(self.peek().span()));
                     return None;
                 };
-                let Some(name) = self.expect() else {
+                let Some(field) = self.expect() else {
                     self.errors
                         .push(ParseError::ExpectedIdent(self.peek().span()));
                     return None;
                 };
-                Some(Expr::Super(SuperExpr { super_, dot, name }))
+                Some(Expr::Super(SuperExpr { super_, dot, field }))
             }
             _ => {
                 self.errors

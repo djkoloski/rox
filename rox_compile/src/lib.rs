@@ -1,5 +1,4 @@
 mod assembly;
-mod collect_fun_decls;
 mod error;
 mod name_resolution;
 
@@ -7,7 +6,6 @@ use rox_parse::Ast;
 use rox_vm::{Chunk, Executable, Function};
 
 pub use self::{assembly::*, error::*, name_resolution::*};
-use crate::collect_fun_decls::CollectFunDeclsPass;
 
 pub struct CompileOutput {
     pub executable: Option<Executable>,
@@ -19,30 +17,30 @@ pub fn compile(
     should_assemble: bool,
 ) -> Result<Executable, Vec<CompileError>> {
     let NameResolutionOutput {
-        errors,
         resolutions,
-        locals_counts,
+        block_locals,
+        function_infos,
+        errors,
     } = NameResolutionPass::compile(ast);
 
     if !should_assemble || !errors.is_empty() {
         return Err(errors);
     }
 
-    let fun_decls = CollectFunDeclsPass::compile(ast);
-
     let mut chunk = Chunk::new();
-    AssemblyPass::new(&resolutions, &locals_counts, &mut chunk)
+    AssemblyPass::new(&resolutions, &block_locals, &mut chunk)
         .compile_program(&ast.program);
 
     let mut functions = Vec::new();
-    for fun_decl in fun_decls {
+    for function_info in function_infos {
         functions.push(Function {
-            name: fun_decl.function.name.value.clone(),
-            arity: fun_decl.function.params.len(),
+            name: function_info.identifier.value.clone(),
+            arity: function_info.function.params.len(),
             ip: chunk.bytes().len(),
+            captures: function_info.captures,
         });
-        AssemblyPass::new(&resolutions, &locals_counts, &mut chunk)
-            .compile_function(fun_decl);
+        AssemblyPass::new(&resolutions, &block_locals, &mut chunk)
+            .compile_function(function_info.function);
     }
 
     Ok(Executable { chunk, functions })

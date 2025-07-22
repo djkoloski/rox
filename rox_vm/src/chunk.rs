@@ -68,69 +68,6 @@ impl Chunk {
             span,
         );
     }
-
-    pub fn disassemble(&self) {
-        let mut offset = 0;
-        while offset < self.bytes.len() {
-            self.disassemble_instruction(&mut offset);
-        }
-    }
-
-    pub fn disassemble_instruction(&self, offset: &mut usize) {
-        print!("{offset:0>4x} ");
-
-        let span = self.spans[*offset];
-        if *offset > 0 && span == self.spans[*offset - 1] {
-            print!("   | ");
-        } else {
-            print!("{}..{} ", span.start(), span.end());
-        }
-
-        let op = Op::decode(self.bytes(), offset).unwrap();
-        print!("{op:16}");
-
-        match op {
-            Op::Return
-            | Op::Nil
-            | Op::True
-            | Op::False
-            | Op::Not
-            | Op::Negate
-            | Op::Add
-            | Op::Subtract
-            | Op::Multiply
-            | Op::Divide
-            | Op::Equal
-            | Op::Greater
-            | Op::Less
-            | Op::Print
-            | Op::Pop
-            | Op::GetLocal { .. }
-            | Op::GetLocalLong { .. }
-            | Op::SetLocal { .. }
-            | Op::SetLocalLong { .. }
-            | Op::JumpIfFalse { .. }
-            | Op::Jump { .. }
-            | Op::Loop { .. }
-            | Op::PushFrame
-            | Op::Call { .. } => (),
-            Op::Constant { index }
-            | Op::ConstantLong { index }
-            | Op::DefineGlobal { index }
-            | Op::DefineGlobalLong { index }
-            | Op::GetGlobal { index }
-            | Op::GetGlobalLong { index }
-            | Op::SetGlobal { index }
-            | Op::SetGlobalLong { index } => self.debug_constant(index),
-        }
-
-        println!();
-    }
-
-    fn debug_constant(&self, index: usize) {
-        let value = &self.constants[index];
-        print!(" '{value}'");
-    }
 }
 
 impl Default for Chunk {

@@ -3,6 +3,8 @@ pub mod codec;
 mod error;
 mod executable;
 mod globals;
+mod memory;
+mod object;
 mod op;
 pub mod rle;
 mod value;
@@ -14,6 +16,8 @@ pub use self::{
     error::*,
     executable::*,
     globals::*,
+    memory::*,
+    object::*,
     op::*,
     value::*,
     virtual_machine::*,

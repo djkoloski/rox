@@ -32,6 +32,7 @@ impl Diagnostic for RuntimeDiagnostic {
 #[derive(Debug)]
 pub enum RuntimeError {
     Decode(DecodeError),
+    InternalValue,
     SystemTimeError(SystemTimeError),
     InvalidNativeFunction(InvalidNativeFunction),
 
@@ -41,12 +42,14 @@ pub enum RuntimeError {
     ExpectedFloat { actual: UnpackedValue },
     ExpectedString { actual: UnpackedValue },
     ExpectedFloatOrString { actual: UnpackedValue },
-    ExpectedVariableName { index: usize },
-    ExpectedFunction { actual: UnpackedValue },
+    ExpectedVariableName { actual: f64 },
+    ExpectedCallable { actual: UnpackedValue },
     GlobalAlreadyDefined { name: String, value: UnpackedValue },
     UndefinedGlobal { name: String },
-    LocalVariableOutOfBounds { index: usize },
+    StackVariableOutOfBounds { stack_index: usize },
     TooFewArguments { arity: usize },
+    UpvalueAtGlobalScope,
+    UpvalueOutOfBounds { upvalue_index: usize },
 }
 
 impl From<DecodeError> for RuntimeError {
@@ -71,6 +74,9 @@ impl fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Decode(e) => write!(f, "decode error: {e}")?,
+            Self::InternalValue => {
+                write!(f, "attempted to display an internal stack value")?
+            }
             Self::SystemTimeError(e) => write!(f, "system time error: {e}")?,
             Self::InvalidNativeFunction(e) => {
                 write!(f, "invalid native function: {}", e.index)?
@@ -88,11 +94,11 @@ impl fmt::Display for RuntimeError {
             Self::ExpectedFloatOrString { actual } => {
                 write!(f, "expected float or string, got {actual:?}")?;
             }
-            Self::ExpectedVariableName { index } => {
-                write!(f, "expected a variable name in constant {index}")?;
+            Self::ExpectedVariableName { actual } => {
+                write!(f, "expected a variable name, got {actual:?}")?;
             }
-            Self::ExpectedFunction { actual } => {
-                write!(f, "expected function, got {actual:?}")?;
+            Self::ExpectedCallable { actual } => {
+                write!(f, "expected callable, got {actual:?}")?;
             }
             Self::GlobalAlreadyDefined { name, value } => {
                 write!(
@@ -104,14 +110,23 @@ impl fmt::Display for RuntimeError {
             Self::UndefinedGlobal { name } => {
                 write!(f, "global variable '{name}' was undefined")?;
             }
-            Self::LocalVariableOutOfBounds { index } => {
-                write!(f, "local variable #{index} was out-of-bounds")?;
+            Self::StackVariableOutOfBounds { stack_index } => {
+                write!(f, "stack variable #{stack_index} was out-of-bounds")?;
             }
             Self::TooFewArguments { arity } => {
                 write!(
                     f,
                     "too few arguments to call function of arity {arity}"
                 )?;
+            }
+            Self::UpvalueAtGlobalScope => {
+                write!(
+                    f,
+                    "attempted to perform an upvalue operation at global scope",
+                )?;
+            }
+            Self::UpvalueOutOfBounds { upvalue_index } => {
+                write!(f, "upvalue #{upvalue_index} was out-of-bounds",)?;
             }
         }
 

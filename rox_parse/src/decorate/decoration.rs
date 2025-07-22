@@ -52,6 +52,14 @@ impl<T> fmt::Debug for Decoration<T> {
     }
 }
 
+impl<D> Clone for Decoration<D> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<D> Copy for Decoration<D> {}
+
 pub trait DecorationKind {
     const DECORATION_INDEX: usize;
 }

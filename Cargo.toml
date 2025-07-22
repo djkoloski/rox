@@ -10,7 +10,6 @@ members = [
 resolver = "3"
 
 [workspace.dependencies]
-hashbrown = "0.15"
 rox_compile = { path = "rox_compile" }
 rox_diag = { path = "rox_diag" }
 rox_lex = { path = "rox_lex" }

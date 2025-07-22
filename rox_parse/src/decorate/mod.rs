@@ -34,7 +34,7 @@ macro_rules! impl_decorations {
 }
 
 define_decorations! {
-    NameResolution,
-    LocalsCount,
-    FunctionLabel,
+    NameDecoration,
+    BlockDecoration,
+    FunctionDecoration,
 }
