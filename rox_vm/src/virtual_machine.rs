@@ -1,7 +1,4 @@
-use std::{
-    collections::{BTreeMap, btree_map::Entry},
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
     Codec, Constant, Executable, Handle, Memory, NativeFunction, Op, Place,
@@ -14,7 +11,6 @@ pub struct VirtualMachine<'exe> {
     fp: usize,
 
     memory: Memory,
-    open_upvalues: BTreeMap<usize, Handle<Upvalue>>,
 }
 
 impl<'exe> VirtualMachine<'exe> {
@@ -24,8 +20,7 @@ impl<'exe> VirtualMachine<'exe> {
             ip: 0,
             fp: 0,
 
-            memory: Memory::new(),
-            open_upvalues: BTreeMap::new(),
+            memory: unsafe { Memory::new() },
         }
     }
 
@@ -69,12 +64,7 @@ impl<'exe> VirtualMachine<'exe> {
     }
 
     fn pop_frame(&mut self) -> Result<usize, RuntimeError> {
-        while let Some(last) = self.open_upvalues.last_entry()
-            && *last.key() > self.fp
-        {
-            last.get().close();
-            last.remove();
-        }
+        self.memory.close_upvalues_ge(self.fp);
 
         while self.memory.stack_len() > self.fp {
             self.memory.pop()?;
@@ -119,7 +109,7 @@ impl<'exe> VirtualMachine<'exe> {
         upvalue_index: usize,
     ) -> Result<Handle<Upvalue>, RuntimeError> {
         let UnpackedValue::Closure(closure) =
-            self.memory.read_stack(self.fp)?.unpack()?
+            self.memory.read_stack(self.fp)?.unpack()
         else {
             return Err(RuntimeError::UpvalueAtGlobalScope);
         };
@@ -138,14 +128,7 @@ impl<'exe> VirtualMachine<'exe> {
         Ok(match place {
             Place::Local { local_index } => {
                 let stack_index = self.fp + local_index;
-                match self.open_upvalues.entry(stack_index) {
-                    Entry::Occupied(occupied) => occupied.get().clone(),
-                    Entry::Vacant(vacant) => {
-                        let upvalue = self.memory.create_upvalue(stack_index);
-                        vacant.insert(upvalue.clone());
-                        upvalue
-                    }
-                }
+                self.memory.capture_upvalue(stack_index)
             }
             Place::Upvalue { upvalue_index } => {
                 self.get_upvalue(*upvalue_index)?.clone()
@@ -196,7 +179,7 @@ impl<'exe> VirtualMachine<'exe> {
                 Op::Add => {
                     let rhs = self.memory.pop()?;
                     let lhs = self.memory.pop()?;
-                    let result = match (lhs.unpack()?, rhs.unpack()?) {
+                    let result = match (lhs.unpack(), rhs.unpack()) {
                         (
                             UnpackedValue::Float(lhs),
                             UnpackedValue::Float(rhs),
@@ -243,7 +226,7 @@ impl<'exe> VirtualMachine<'exe> {
                 }
                 Op::Print => {
                     let value = self.memory.pop()?;
-                    self.display_value(&value)?;
+                    self.display_value(&value);
                     println!();
                 }
                 Op::Pop => {
@@ -286,11 +269,11 @@ impl<'exe> VirtualMachine<'exe> {
                 Op::Jump { distance } => next_ip += distance,
                 Op::Loop { distance } => next_ip -= distance,
                 Op::PushFrame => {
-                    self.memory.push(Value::internal())?;
-                    self.memory.push(Value::internal())?;
+                    self.memory.push(Value::register(0))?;
+                    self.memory.push(Value::register(0))?;
                 }
                 Op::Call { arity } => {
-                    if self.memory.stack_len() - self.fp <= arity {
+                    if self.memory.stack_len() <= self.fp + arity {
                         return Err(RuntimeError::TooFewArguments { arity });
                     }
 
@@ -306,14 +289,20 @@ impl<'exe> VirtualMachine<'exe> {
                     self.fp = next_fp;
                     let target = self.memory.read_stack(self.fp)?;
 
-                    match target.unpack()? {
+                    match target.unpack() {
                         UnpackedValue::Closure(closure) => {
                             let function = &self.executable.functions
                                 [closure.function_index];
                             next_ip = function.ip;
                         }
-                        UnpackedValue::NativeFunction(function) => {
-                            let return_value = self.call_native(function)?;
+                        UnpackedValue::NativeFunction(
+                            native_function_index,
+                        ) => {
+                            let native_function = NativeFunction::try_from(
+                                native_function_index,
+                            )?;
+                            let return_value =
+                                self.call_native(native_function)?;
                             self.pop_frame()?;
                             self.memory.push(return_value)?;
                         }
@@ -338,11 +327,9 @@ impl<'exe> VirtualMachine<'exe> {
                     self.memory.push(Value::closure(closure))?;
                 }
                 Op::CloseLocal => {
-                    if let Some(last) = self.open_upvalues.last_entry()
-                        && last.key() + 1 == self.memory.stack_len()
-                    {
-                        last.get().close();
-                        last.remove();
+                    let stack_len = self.memory.stack_len();
+                    if stack_len > 0 {
+                        self.memory.close_upvalues_ge(stack_len - 1);
                     }
                     self.memory.pop()?;
                 }
@@ -362,9 +349,10 @@ impl<'exe> VirtualMachine<'exe> {
         Ok(())
     }
 
-    fn display_value(&self, value: &Value) -> Result<(), RuntimeError> {
-        match value.unpack()? {
+    fn display_value(&self, value: &Value) {
+        match value.unpack() {
             UnpackedValue::Float(f) => print!("{f}"),
+            UnpackedValue::Register(r) => print!("<register={r}>"),
             UnpackedValue::Nil => print!("<nil>"),
             UnpackedValue::False => print!("false"),
             UnpackedValue::True => print!("true"),
@@ -373,15 +361,19 @@ impl<'exe> VirtualMachine<'exe> {
                 let function = &self.executable.functions[c.function_index];
                 print!("<fun {}>", function.name)
             }
-            UnpackedValue::NativeFunction(f) => print!("<nat {}>", f.name()),
+            UnpackedValue::NativeFunction(f) => {
+                let name = NativeFunction::try_from(f)
+                    .map(|nf| nf.name())
+                    .unwrap_or("invalid");
+                print!("<nat {name}>");
+            }
         }
-
-        Ok(())
     }
 
-    fn debug_value(&self, value: &Value) -> Result<(), RuntimeError> {
-        match value.unpack()? {
+    fn debug_value(&self, value: &Value) {
+        match value.unpack() {
             UnpackedValue::Float(f) => print!("{f}"),
+            UnpackedValue::Register(r) => print!("<register={r}>"),
             UnpackedValue::Nil => print!("<nil>"),
             UnpackedValue::False => print!("false"),
             UnpackedValue::True => print!("true"),
@@ -390,10 +382,13 @@ impl<'exe> VirtualMachine<'exe> {
                 let function = &self.executable.functions[c.function_index];
                 print!("<fun {}>", function.name)
             }
-            UnpackedValue::NativeFunction(f) => print!("<nat {}>", f.name()),
+            UnpackedValue::NativeFunction(f) => {
+                let name = NativeFunction::try_from(f)
+                    .map(|nf| nf.name())
+                    .unwrap_or("invalid");
+                print!("<nat {name}>");
+            }
         }
-
-        Ok(())
     }
 
     #[allow(unused)]
@@ -435,12 +430,12 @@ impl<'exe> VirtualMachine<'exe> {
                     frame += 1;
                 }
                 StackKind::Value(v) => {
-                    if v == Value::internal() {
+                    if v == Value::register(0) {
                         print!(" => ");
                         i += 1;
                     } else {
                         print!("[");
-                        self.debug_value(&v)?;
+                        self.debug_value(&v);
                         print!("]");
                     }
                 }

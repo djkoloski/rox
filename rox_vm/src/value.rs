@@ -1,6 +1,6 @@
 use core::fmt;
 
-use crate::{Closure, Handle, RuntimeError, String};
+use crate::{Closure, ErasedHandle, Handle, String};
 
 #[derive(Debug, PartialEq)]
 pub enum Constant {
@@ -72,7 +72,8 @@ const TAG_BIT2: u64 = 0x00_01_00_00_00_00_00_00;
 const TAG_BITS: u64 = TAG_BIT0 | TAG_BIT1 | TAG_BIT2;
 const DATA_BITS: u64 = 0x00_00_ff_ff_ff_ff_ff_ff;
 
-const TAG_ENUMERATED: u64 = 0;
+const TAG_REGISTER: u64 = 0;
+const TAG_ENUMERATED: u64 = TAG_BIT0;
 const TAG_STRING: u64 = TAG_BIT1;
 const TAG_CLOSURE: u64 = TAG_BIT0 | TAG_BIT1;
 const _TAG_UNUSED0: u64 = TAG_BIT2;
@@ -80,13 +81,11 @@ const _TAG_UNUSED1: u64 = TAG_BIT0 | TAG_BIT2;
 const _TAG_UNUSED2: u64 = TAG_BIT1 | TAG_BIT2;
 const _TAG_UNUSED3: u64 = TAG_BIT0 | TAG_BIT1 | TAG_BIT2;
 
-const ENUM_INTERNAL: u64 = 0;
-const ENUM_NIL: u64 = 1;
-const ENUM_FALSE: u64 = 2;
-const ENUM_TRUE: u64 = 3;
-const ENUM_NATIVE_FUNCTION0: u64 = 4;
+const ENUM_NIL: u64 = 0;
+const ENUM_FALSE: u64 = 1;
+const ENUM_TRUE: u64 = 2;
+const ENUM_NATIVE_FUNCTION0: u64 = 3;
 
-const INTERNAL_BITS: u64 = NAN_BITS | TAG_ENUMERATED | ENUM_INTERNAL;
 const NIL_BITS: u64 = NAN_BITS | TAG_ENUMERATED | ENUM_NIL;
 const FALSE_BITS: u64 = NAN_BITS | TAG_ENUMERATED | ENUM_FALSE;
 const TRUE_BITS: u64 = NAN_BITS | TAG_ENUMERATED | ENUM_TRUE;
@@ -100,18 +99,14 @@ pub struct Value {
 
 impl Value {
     pub const fn register(value: u64) -> Self {
-        Self { bits: value }
+        Self {
+            bits: NAN_BITS | TAG_REGISTER | (value & DATA_BITS),
+        }
     }
 
     pub const fn float(value: f64) -> Self {
         Self {
             bits: value.to_bits(),
-        }
-    }
-
-    pub const fn internal() -> Self {
-        Self {
-            bits: INTERNAL_BITS,
         }
     }
 
@@ -150,29 +145,29 @@ impl Value {
     }
 
     pub fn as_register(self) -> u64 {
-        self.bits
+        self.bits & DATA_BITS
     }
 
     pub fn as_float(self) -> f64 {
         f64::from_bits(self.bits)
     }
 
-    pub fn unpack(&self) -> Result<UnpackedValue, RuntimeError> {
+    pub fn unpack(&self) -> UnpackedValue {
         if self.bits & NAN_BITS != NAN_BITS {
-            return Ok(UnpackedValue::Float(f64::from_bits(self.bits)));
+            return UnpackedValue::Float(f64::from_bits(self.bits));
         }
 
         let tag = self.bits & TAG_BITS;
         let data = self.bits & DATA_BITS;
-        Ok(match tag {
+        match tag {
+            TAG_REGISTER => UnpackedValue::Register(data as usize),
             TAG_ENUMERATED => match data {
-                ENUM_INTERNAL => return Err(RuntimeError::InternalValue),
                 ENUM_NIL => UnpackedValue::Nil,
                 ENUM_FALSE => UnpackedValue::False,
                 ENUM_TRUE => UnpackedValue::True,
-                f => UnpackedValue::NativeFunction(NativeFunction::try_from(
+                f => UnpackedValue::NativeFunction(
                     (f - ENUM_NATIVE_FUNCTION0) as usize,
-                )?),
+                ),
             },
             TAG_STRING => UnpackedValue::String(unsafe {
                 Handle::from_address(data as usize)
@@ -181,17 +176,31 @@ impl Value {
                 Handle::from_address(data as usize)
             }),
             _ => unreachable!(),
-        })
+        }
+    }
+
+    pub fn gc_mark(&self, frontier: &mut Vec<ErasedHandle>) {
+        match self.unpack() {
+            UnpackedValue::Closure(handle) => handle.gc_mark(frontier),
+            UnpackedValue::String(handle) => handle.gc_mark(frontier),
+            UnpackedValue::Register(_)
+            | UnpackedValue::Nil
+            | UnpackedValue::True
+            | UnpackedValue::False
+            | UnpackedValue::Float(_)
+            | UnpackedValue::NativeFunction(_) => (),
+        }
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum UnpackedValue {
     Float(f64),
+    Register(usize),
     Nil,
     False,
     True,
-    NativeFunction(NativeFunction),
+    NativeFunction(usize),
     String(Handle<String>),
     Closure(Handle<Closure>),
 }
