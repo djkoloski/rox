@@ -199,6 +199,23 @@ impl ErasedHandle {
         }
     }
 
+    pub fn gc_layout(&self) -> Layout {
+        let header = unsafe { self.ptr.as_ref() };
+        unsafe {
+            match header.tag {
+                Tag::String => Layout::for_value(
+                    &*Handle::<String>::from_ptr(self.ptr).as_ptr(),
+                ),
+                Tag::Closure => Layout::for_value(
+                    &*Handle::<Closure>::from_ptr(self.ptr).as_ptr(),
+                ),
+                Tag::Upvalue => Layout::for_value(
+                    &*Handle::<Upvalue>::from_ptr(self.ptr).as_ptr(),
+                ),
+            }
+        }
+    }
+
     pub fn gc_mark(&self, frontier: &mut Vec<ErasedHandle>) {
         let header = unsafe { self.ptr.as_ref() };
         unsafe {

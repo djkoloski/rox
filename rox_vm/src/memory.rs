@@ -16,6 +16,8 @@ pub struct Memory {
     open_upvalues: BTreeMap<usize, Handle<Upvalue>>,
 
     strings: HashSet<Handle<String>>,
+    bytes_allocated: usize,
+    next_gc: usize,
 }
 
 impl Drop for Memory {
@@ -42,6 +44,8 @@ impl Memory {
             open_upvalues: BTreeMap::new(),
 
             strings: HashSet::new(),
+            bytes_allocated: 0,
+            next_gc: 1024 * 1024,
         }
     }
 
@@ -184,11 +188,15 @@ impl Memory {
         &mut self,
         f: impl FnOnce(Option<ErasedHandle>) -> Handle<T>,
     ) -> Handle<T> {
-        #[cfg(feature = "debug_gc")]
-        self.collect_garbage();
+        if self.bytes_allocated > self.next_gc || cfg!(feature = "debug_gc") {
+            self.collect_garbage();
+        }
 
         let handle = f(self.handles.clone());
-        self.handles = Some(Handle::erase(handle.clone()));
+
+        let erased = Handle::erase(handle.clone());
+        self.bytes_allocated += erased.gc_layout().size();
+        self.handles = Some(erased);
 
         handle
     }
@@ -228,6 +236,7 @@ impl Memory {
                 {
                     self.strings.remove(&string_handle);
                 }
+                self.bytes_allocated -= current_handle.gc_layout().size();
                 current = unsafe { current_handle.gc_sweep() };
                 if let Some(previous_handle) = previous.as_mut() {
                     previous_handle.gc_set_next(current.clone());
@@ -236,6 +245,8 @@ impl Memory {
                 }
             }
         }
+
+        self.next_gc = self.bytes_allocated * 2;
 
         #[cfg(feature = "debug_gc")]
         println!("-- gc end");

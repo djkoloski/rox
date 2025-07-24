@@ -7,6 +7,6 @@ edition = "2024"
 rox_diag.workspace = true
 
 [features]
-default = ["debug_gc"]
+default = []
 trace = []
 debug_gc = []
