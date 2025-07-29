@@ -37,4 +37,5 @@ define_decorations! {
     NameDecoration,
     BlockDecoration,
     FunctionDecoration,
+    ClassDecoration,
 }

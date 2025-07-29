@@ -3,7 +3,7 @@ mod error;
 mod name_resolution;
 
 use rox_parse::Ast;
-use rox_vm::{Chunk, Executable, Function};
+use rox_vm::{Chunk, ClassDef, Executable, FunctionDef};
 
 pub use self::{assembly::*, error::*, name_resolution::*};
 
@@ -20,6 +20,7 @@ pub fn compile(
         resolutions,
         block_locals,
         function_infos,
+        class_infos,
         errors,
     } = NameResolutionPass::compile(ast);
 
@@ -33,7 +34,7 @@ pub fn compile(
 
     let mut functions = Vec::new();
     for function_info in function_infos {
-        functions.push(Function {
+        functions.push(FunctionDef {
             name: function_info.identifier.value.clone(),
             arity: function_info.function.params.len(),
             ip: chunk.bytes().len(),
@@ -43,5 +44,16 @@ pub fn compile(
             .compile_function(function_info.function);
     }
 
-    Ok(Executable { chunk, functions })
+    let mut classes = Vec::new();
+    for class_info in class_infos {
+        classes.push(ClassDef {
+            name: class_info.identifier.value.clone(),
+        });
+    }
+
+    Ok(Executable {
+        chunk,
+        functions,
+        classes,
+    })
 }

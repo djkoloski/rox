@@ -6,8 +6,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 pub use self::object::Handle;
 use self::object::{HandleOperation, ObjectHandle, ObjectKind};
 use crate::{
-    Closure, Emplace, NewClosure, RuntimeError, String, Upvalue, Value,
-    global_values,
+    Class, Closure, Emplace, Instance, NewClass, NewClosure, NewInstance,
+    RuntimeError, String, Upvalue, Value, global_values,
 };
 
 const MAX_STACK_LEN: usize = 255;
@@ -202,6 +202,17 @@ impl Memory {
         }
     }
 
+    pub fn create_class(&mut self, class_index: usize) -> Handle<Class> {
+        self.create_object(NewClass { class_index })
+    }
+
+    pub fn create_instance(
+        &mut self,
+        class: Handle<Class>,
+    ) -> Handle<Instance> {
+        self.create_object(NewInstance { class })
+    }
+
     pub fn close_upvalues_ge(&mut self, stack_index: usize) {
         while let Some(last) = self.open_upvalues.last_entry()
             && *last.key() >= stack_index
@@ -211,11 +222,13 @@ impl Memory {
         }
     }
 
-    fn collect_garbage(&mut self) {
+    fn collect_garbage(&mut self, temporary: ObjectHandle) {
         #[cfg(feature = "debug_gc")]
         println!("-- gc begin");
 
         let mut frontier = Vec::new();
+
+        temporary.gc_mark(&mut frontier);
 
         for global in self.globals.values() {
             if let Some(handle) = value_to_object_handle(*global) {
@@ -274,14 +287,15 @@ impl Memory {
         &mut self,
         emplacer: impl Emplace<T>,
     ) -> Handle<T> {
-        if self.bytes_allocated > self.next_gc || cfg!(feature = "debug_gc") {
-            self.collect_garbage();
-        }
-
         let handle = Handle::create(emplacer, self.handles);
 
         self.bytes_allocated += Handle::object_layout(handle).size();
-        self.handles = Some(Handle::erase(handle));
+        let erased = Handle::erase(handle);
+        self.handles = Some(erased);
+
+        if self.bytes_allocated > self.next_gc || cfg!(feature = "debug_gc") {
+            self.collect_garbage(erased);
+        }
 
         handle
     }
@@ -320,5 +334,7 @@ fn value_to_object_handle(value: Value) -> Option<ObjectHandle> {
         | crate::UnpackedValue::NativeFunction(_) => None,
         crate::UnpackedValue::String(handle) => Some(Handle::erase(handle)),
         crate::UnpackedValue::Closure(handle) => Some(Handle::erase(handle)),
+        crate::UnpackedValue::Class(handle) => Some(Handle::erase(handle)),
+        crate::UnpackedValue::Instance(handle) => Some(Handle::erase(handle)),
     }
 }

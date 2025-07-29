@@ -9,7 +9,8 @@ use core::{
 use std::alloc::{alloc, dealloc, handle_alloc_error};
 
 use crate::{
-    Closure, Emplace, Pointee, String, Upvalue, memory::value_to_object_handle,
+    Class, Closure, Emplace, Instance, Pointee, String, Upvalue,
+    memory::value_to_object_handle,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -17,12 +18,20 @@ pub enum Tag {
     String,
     Closure,
     Upvalue,
+    Class,
+    Instance,
 }
 
 pub trait ObjectKind: Pointee {
     const TAG: Tag;
 
     fn gc_explore(&self, frontier: &mut Vec<ObjectHandle>);
+}
+
+impl ObjectKind for Class {
+    const TAG: Tag = Tag::Class;
+
+    fn gc_explore(&self, _frontier: &mut Vec<ObjectHandle>) {}
 }
 
 impl ObjectKind for String {
@@ -47,6 +56,20 @@ impl ObjectKind for Upvalue {
     fn gc_explore(&self, frontier: &mut Vec<ObjectHandle>) {
         if let Some(object_handle) = value_to_object_handle(self.read()) {
             frontier.push(object_handle);
+        }
+    }
+}
+
+impl ObjectKind for Instance {
+    const TAG: Tag = Tag::Instance;
+
+    fn gc_explore(&self, frontier: &mut Vec<ObjectHandle>) {
+        frontier.push(Handle::erase(self.class));
+
+        for value in self.fields.borrow().values() {
+            if let Some(handle) = value_to_object_handle(*value) {
+                frontier.push(handle);
+            }
         }
     }
 }
@@ -233,7 +256,7 @@ struct GcExplore<'a> {
 impl<T: ObjectKind + fmt::Debug + ?Sized> HandleOperation<T> for GcExplore<'_> {
     fn operate(self, handle: Handle<T>) {
         #[cfg(feature = "debug_gc")]
-        print!("{:?} mark: {:?}", handle.ptr.as_ptr(), handle.get());
+        println!("{:?} mark: {:?}", handle.ptr.as_ptr(), handle.get());
 
         handle.get().gc_explore(self.frontier);
     }
@@ -268,7 +291,9 @@ impl ObjectHandle {
     where
         O: HandleOperation<String>
             + HandleOperation<Closure>
-            + HandleOperation<Upvalue>,
+            + HandleOperation<Upvalue>
+            + HandleOperation<Class>
+            + HandleOperation<Instance>,
     {
         unsafe {
             match self.header().tag {
@@ -280,6 +305,12 @@ impl ObjectHandle {
                 }
                 Tag::Upvalue => {
                     operation.operate(self.downcast_unchecked::<Upvalue>())
+                }
+                Tag::Class => {
+                    operation.operate(self.downcast_unchecked::<Class>())
+                }
+                Tag::Instance => {
+                    operation.operate(self.downcast_unchecked::<Instance>())
                 }
             }
         }

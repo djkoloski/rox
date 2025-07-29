@@ -4,10 +4,11 @@ use std::collections::{HashMap, hash_map::Entry};
 use rox_diag::{Span, Spanned as _};
 use rox_lex::token_kind::Identifier;
 use rox_parse::{
-    Ast, BlockDecoration, Dec, FunctionDecoration, NameDecoration, Visit as _,
+    Ast, BlockDecoration, ClassDecoration, Dec, FunctionDecoration,
+    NameDecoration, Visit as _,
     ast::{
-        AssignExpr, BlockStmt, FunDeclStmt, Function, Name, VarDeclStmt,
-        VariableExpr, Visitor, visit,
+        AssignExpr, BlockStmt, ClassDeclStmt, FunDeclStmt, Function, Name,
+        VarDeclStmt, VariableExpr, Visitor, visit,
     },
 };
 use rox_vm::{Place, global_names};
@@ -46,10 +47,15 @@ pub struct FunctionInfo<'ast> {
     pub captures: Vec<Place>,
 }
 
+pub struct ClassInfo<'ast> {
+    pub identifier: &'ast Identifier,
+}
+
 pub struct NameResolutionOutput<'ast> {
     pub resolutions: Vec<Resolution>,
     pub block_locals: Vec<Vec<LocalDeclaration>>,
     pub function_infos: Vec<FunctionInfo<'ast>>,
+    pub class_infos: Vec<ClassInfo<'ast>>,
     pub errors: Vec<CompileError>,
 }
 
@@ -294,6 +300,7 @@ pub struct NameResolutionPass<'ast> {
     resolutions: Dec<NameDecoration, Resolution>,
     block_locals: Dec<BlockDecoration, Vec<LocalDeclaration>>,
     function_infos: Dec<FunctionDecoration, FunctionInfo<'ast>>,
+    class_infos: Dec<ClassDecoration, ClassInfo<'ast>>,
     errors: Vec<CompileError>,
 }
 
@@ -439,6 +446,7 @@ impl<'ast> NameResolutionPass<'ast> {
             resolutions: Dec::new(&ast.decorator),
             block_locals: Dec::new(&ast.decorator),
             function_infos: Dec::new(&ast.decorator),
+            class_infos: Dec::new(&ast.decorator),
             errors: Vec::new(),
         };
 
@@ -455,6 +463,7 @@ impl<'ast> NameResolutionPass<'ast> {
             resolutions: pass.resolutions.unwrap(),
             block_locals: pass.block_locals.unwrap(),
             function_infos: pass.function_infos.unwrap(),
+            class_infos: pass.class_infos.unwrap(),
             errors: pass.errors,
         }
     }
@@ -493,5 +502,18 @@ impl<'ast> Visitor<'ast> for NameResolutionPass<'ast> {
         visit::visit_block_stmt(self, &node.function.body);
 
         self.pop_frame(&node.identifier);
+    }
+
+    fn visit_class_decl_stmt(&mut self, node: &'ast ClassDeclStmt) {
+        self.declare(&node.identifier);
+
+        visit::visit_class_decl_stmt(self, node);
+
+        self.class_infos.insert(
+            node.decoration,
+            ClassInfo {
+                identifier: &node.identifier,
+            },
+        );
     }
 }

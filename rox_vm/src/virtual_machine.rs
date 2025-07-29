@@ -306,6 +306,11 @@ impl<'exe> VirtualMachine<'exe> {
                             self.pop_frame()?;
                             self.memory.push(return_value)?;
                         }
+                        UnpackedValue::Class(class) => {
+                            self.pop_frame()?;
+                            let instance = self.memory.create_instance(class);
+                            self.memory.push(Value::instance(instance))?;
+                        }
                         actual => {
                             return Err(RuntimeError::ExpectedCallable {
                                 actual,
@@ -343,6 +348,64 @@ impl<'exe> VirtualMachine<'exe> {
                     let value = self.memory.top()?;
                     self.get_upvalue(upvalue_index)?.write(value);
                 }
+                Op::Class { class_index } | Op::ClassLong { class_index } => {
+                    let class = self.memory.create_class(class_index);
+                    self.memory.push(Value::class(class))?;
+                }
+                Op::GetField { constant_index }
+                | Op::GetFieldLong { constant_index } => {
+                    // Check that the constant is a string
+                    match self.get_constant(constant_index)? {
+                        Constant::String(_) => (),
+                        Constant::Float(f) => {
+                            return Err(RuntimeError::ExpectedString {
+                                actual: UnpackedValue::Float(*f),
+                            });
+                        }
+                    }
+
+                    // Get the instance
+                    let instance = self.memory.pop()?.unpack();
+                    let UnpackedValue::Instance(instance) = instance else {
+                        return Err(RuntimeError::ExpectedInstance {
+                            actual: instance,
+                        });
+                    };
+
+                    // Look for the field by constant index
+                    let fields = instance.fields.borrow();
+                    let Some(value) = fields.get(&constant_index) else {
+                        return Err(RuntimeError::UndefinedField);
+                    };
+
+                    self.memory.push(*value)?;
+                }
+                Op::SetField { constant_index }
+                | Op::SetFieldLong { constant_index } => {
+                    // Check that the constant is a string
+                    match self.get_constant(constant_index)? {
+                        Constant::String(_) => (),
+                        Constant::Float(f) => {
+                            return Err(RuntimeError::ExpectedString {
+                                actual: UnpackedValue::Float(*f),
+                            });
+                        }
+                    }
+
+                    // Get the instance
+                    let instance = self.memory.pop()?.unpack();
+                    let UnpackedValue::Instance(instance) = instance else {
+                        return Err(RuntimeError::ExpectedInstance {
+                            actual: instance,
+                        });
+                    };
+
+                    // Set the field by constant index
+                    instance
+                        .fields
+                        .borrow_mut()
+                        .insert(constant_index, self.memory.top()?);
+                }
             }
             self.ip = next_ip;
         }
@@ -360,6 +423,18 @@ impl<'exe> VirtualMachine<'exe> {
             UnpackedValue::Closure(c) => {
                 let function = &self.executable.functions[c.function_index];
                 print!("<fun {}>", function.name)
+            }
+            UnpackedValue::Class(c) => {
+                print!(
+                    "<class {}>",
+                    self.executable.classes[c.class_index].name
+                )
+            }
+            UnpackedValue::Instance(i) => {
+                print!(
+                    "<instance {}>",
+                    self.executable.classes[i.class.class_index].name
+                )
             }
             UnpackedValue::NativeFunction(f) => {
                 let name = NativeFunction::try_from(f)
@@ -381,6 +456,18 @@ impl<'exe> VirtualMachine<'exe> {
             UnpackedValue::Closure(c) => {
                 let function = &self.executable.functions[c.function_index];
                 print!("<fun {}>", function.name)
+            }
+            UnpackedValue::Class(c) => {
+                print!(
+                    "<class {}>",
+                    self.executable.classes[c.class_index].name
+                )
+            }
+            UnpackedValue::Instance(i) => {
+                print!(
+                    "<instance {}>",
+                    self.executable.classes[i.class.class_index].name
+                )
             }
             UnpackedValue::NativeFunction(f) => {
                 let name = NativeFunction::try_from(f)

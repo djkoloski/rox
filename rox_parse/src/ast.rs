@@ -1,8 +1,8 @@
 use rox_lex::token_kind::*;
 
 use crate::{
-    BlockDecoration, Decoration, FunctionDecoration, NameDecoration,
-    Punctuated, ast_macro::*,
+    BlockDecoration, ClassDecoration, Decoration, FunctionDecoration,
+    NameDecoration, Punctuated, ast_macro::*,
 };
 
 token_group! {
@@ -179,6 +179,7 @@ ast! {
 
     #[accept = visit_class_decl_stmt]
     pub struct ClassDeclStmt {
+        pub decoration: Decoration<ClassDecoration>,
         pub class: Class,
         pub identifier: Identifier,
         pub inheritance: Option<Inheritance>,
@@ -190,6 +191,7 @@ ast! {
 
     pub struct Method {
         pub identifier: Identifier,
+        #[visit]
         pub function: Function,
     }
 

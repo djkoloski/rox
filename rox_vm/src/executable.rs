@@ -7,16 +7,21 @@ pub enum Place {
     Upvalue { upvalue_index: usize },
 }
 
-pub struct Function {
+pub struct FunctionDef {
     pub name: String,
     pub arity: usize,
     pub ip: usize,
     pub captures: Vec<Place>,
 }
 
+pub struct ClassDef {
+    pub name: String,
+}
+
 pub struct Executable {
     pub chunk: Chunk,
-    pub functions: Vec<Function>,
+    pub functions: Vec<FunctionDef>,
+    pub classes: Vec<ClassDef>,
 }
 
 impl Executable {
@@ -80,7 +85,11 @@ impl Executable {
             | Op::GetGlobal { constant_index }
             | Op::GetGlobalLong { constant_index }
             | Op::SetGlobal { constant_index }
-            | Op::SetGlobalLong { constant_index } => {
+            | Op::SetGlobalLong { constant_index }
+            | Op::GetField { constant_index }
+            | Op::GetFieldLong { constant_index }
+            | Op::SetField { constant_index }
+            | Op::SetFieldLong { constant_index } => {
                 let value = &self.chunk.constants()[constant_index];
                 print!(" {value}");
             }
@@ -88,6 +97,10 @@ impl Executable {
             | Op::CloseFunctionLong { function_index } => {
                 let value = &self.functions[function_index];
                 print!(" {}({})", value.name, value.arity);
+            }
+            Op::Class { class_index } | Op::ClassLong { class_index } => {
+                let value = &self.classes[class_index];
+                print!(" {}", value.name);
             }
             Op::GetUpvalue { upvalue_index }
             | Op::GetUpvalueLong { upvalue_index }

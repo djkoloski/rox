@@ -1,6 +1,6 @@
 use core::fmt;
 
-use crate::{Closure, Handle, String};
+use crate::{Class, Closure, Handle, Instance, String};
 
 #[derive(Debug, PartialEq)]
 pub enum Constant {
@@ -76,8 +76,8 @@ const TAG_REGISTER: u64 = 0;
 const TAG_ENUMERATED: u64 = TAG_BIT0;
 const TAG_STRING: u64 = TAG_BIT1;
 const TAG_CLOSURE: u64 = TAG_BIT0 | TAG_BIT1;
-const _TAG_UNUSED0: u64 = TAG_BIT2;
-const _TAG_UNUSED1: u64 = TAG_BIT0 | TAG_BIT2;
+const TAG_CLASS: u64 = TAG_BIT2;
+const TAG_INSTANCE: u64 = TAG_BIT0 | TAG_BIT2;
 const _TAG_UNUSED2: u64 = TAG_BIT1 | TAG_BIT2;
 const _TAG_UNUSED3: u64 = TAG_BIT0 | TAG_BIT1 | TAG_BIT2;
 
@@ -142,6 +142,22 @@ impl Value {
         }
     }
 
+    pub fn class(handle: Handle<Class>) -> Self {
+        Self {
+            bits: NAN_BITS
+                | TAG_CLASS
+                | (Handle::address(handle) as u64 & DATA_BITS),
+        }
+    }
+
+    pub fn instance(handle: Handle<Instance>) -> Self {
+        Self {
+            bits: NAN_BITS
+                | TAG_INSTANCE
+                | (Handle::address(handle) as u64 & DATA_BITS),
+        }
+    }
+
     pub fn truthiness(&self) -> bool {
         self.bits != NIL_BITS && self.bits != FALSE_BITS
     }
@@ -177,6 +193,12 @@ impl Value {
             TAG_CLOSURE => UnpackedValue::Closure(unsafe {
                 Handle::from_address(data as usize)
             }),
+            TAG_CLASS => UnpackedValue::Class(unsafe {
+                Handle::from_address(data as usize)
+            }),
+            TAG_INSTANCE => UnpackedValue::Instance(unsafe {
+                Handle::from_address(data as usize)
+            }),
             _ => unreachable!(),
         }
     }
@@ -192,4 +214,6 @@ pub enum UnpackedValue {
     NativeFunction(usize),
     String(Handle<String>),
     Closure(Handle<Closure>),
+    Class(Handle<Class>),
+    Instance(Handle<Instance>),
 }

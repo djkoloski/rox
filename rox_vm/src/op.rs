@@ -207,6 +207,30 @@ define_ops! {
             #[codec(U24)]
             upvalue_index: usize,
         },
+        Class {
+            #[codec(U8)]
+            class_index: usize,
+        },
+        ClassLong {
+            #[codec(U24)]
+            class_index: usize,
+        },
+        GetField {
+            #[codec(U8)]
+            constant_index: usize,
+        },
+        GetFieldLong {
+            #[codec(U24)]
+            constant_index: usize,
+        },
+        SetField {
+            #[codec(U8)]
+            constant_index: usize,
+        },
+        SetFieldLong {
+            #[codec(U24)]
+            constant_index: usize,
+        },
     }
 }
 
@@ -245,4 +269,7 @@ long_ops! {
     close_function: function_index => CloseFunction, CloseFunctionLong;
     get_upvalue: upvalue_index => GetUpvalue, GetUpvalueLong;
     set_upvalue: upvalue_index => SetUpvalue, SetUpvalueLong;
+    class: class_index => Class, ClassLong;
+    get_field: constant_index => GetField, GetFieldLong;
+    set_field: constant_index => SetField, SetFieldLong;
 }

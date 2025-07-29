@@ -1,10 +1,12 @@
+mod class;
 mod closure;
+mod instance;
 mod string;
 mod upvalue;
 
 use core::{alloc::Layout, ptr::slice_from_raw_parts_mut};
 
-pub use self::{closure::*, string::*, upvalue::*};
+pub use self::{class::*, closure::*, instance::*, string::*, upvalue::*};
 
 /// # Safety
 ///

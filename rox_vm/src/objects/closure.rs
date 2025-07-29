@@ -52,5 +52,3 @@ unsafe impl Emplace<Closure> for NewClosure {
         }
     }
 }
-
-// TODO: impl emplace for closure

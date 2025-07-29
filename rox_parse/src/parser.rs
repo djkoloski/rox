@@ -240,6 +240,7 @@ impl Parser {
         };
 
         Some(ClassDeclStmt {
+            decoration: self.decorator.decorate(),
             class,
             identifier,
             inheritance,

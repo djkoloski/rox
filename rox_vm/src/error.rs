@@ -41,6 +41,7 @@ pub enum RuntimeError {
     ConstantOutOfBounds,
     ExpectedFloat { actual: UnpackedValue },
     ExpectedString { actual: UnpackedValue },
+    ExpectedInstance { actual: UnpackedValue },
     ExpectedFloatOrString { actual: UnpackedValue },
     ExpectedVariableName { actual: f64 },
     ExpectedCallable { actual: UnpackedValue },
@@ -50,6 +51,7 @@ pub enum RuntimeError {
     TooFewArguments { arity: usize },
     UpvalueAtGlobalScope,
     UpvalueOutOfBounds { upvalue_index: usize },
+    UndefinedField,
 }
 
 impl From<DecodeError> for RuntimeError {
@@ -91,6 +93,9 @@ impl fmt::Display for RuntimeError {
             Self::ExpectedString { actual } => {
                 write!(f, "expected string, got {actual:?}")?;
             }
+            Self::ExpectedInstance { actual } => {
+                write!(f, "expected class instance, got {actual:?}")?;
+            }
             Self::ExpectedFloatOrString { actual } => {
                 write!(f, "expected float or string, got {actual:?}")?;
             }
@@ -126,7 +131,10 @@ impl fmt::Display for RuntimeError {
                 )?;
             }
             Self::UpvalueOutOfBounds { upvalue_index } => {
-                write!(f, "upvalue #{upvalue_index} was out-of-bounds",)?;
+                write!(f, "upvalue #{upvalue_index} was out-of-bounds")?;
+            }
+            Self::UndefinedField => {
+                write!(f, "undefined field for instance")?;
             }
         }
 

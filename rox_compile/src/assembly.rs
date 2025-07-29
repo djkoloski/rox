@@ -5,10 +5,11 @@ use rox_lex::token_kind::Identifier;
 use rox_parse::{
     Visit,
     ast::{
-        AssignExpr, BinaryExpr, BinaryOperator, BlockStmt, CallExpr, ExprStmt,
-        FunDeclStmt, Function, IfStmt, Literal, LiteralExpr, PrintStmt,
-        Program, ReturnStmt, UnaryExpr, UnaryOperator, VarDeclStmt,
-        VariableExpr, Visitor, WhileStmt, visit,
+        AssignExpr, BinaryExpr, BinaryOperator, BlockStmt, CallExpr,
+        ClassDeclStmt, ExprStmt, FunDeclStmt, Function, GetExpr, IfStmt,
+        Literal, LiteralExpr, PrintStmt, Program, ReturnStmt, SetExpr,
+        UnaryExpr, UnaryOperator, VarDeclStmt, VariableExpr, Visitor,
+        WhileStmt, visit,
     },
 };
 use rox_vm::{Chunk, Constant, Op};
@@ -336,5 +337,28 @@ impl<'ast> Visitor<'ast> for AssemblyPass<'ast> {
             },
             node.span(),
         );
+    }
+
+    fn visit_class_decl_stmt(&mut self, node: &'ast ClassDeclStmt) {
+        self.chunk
+            .encode(Op::class(node.decoration.index()), node.span());
+        self.define_if_global(&node.identifier);
+    }
+
+    fn visit_get_expr(&mut self, node: &'ast GetExpr) {
+        node.target.accept(self);
+
+        let field_name = self.add_string(node.field.value.clone());
+        self.chunk
+            .encode(Op::get_field(field_name), node.field.span());
+    }
+
+    fn visit_set_expr(&mut self, node: &'ast SetExpr) {
+        node.expr.accept(self);
+        node.target.accept(self);
+
+        let field_name = self.add_string(node.field.value.clone());
+        self.chunk
+            .encode(Op::set_field(field_name), node.field.span());
     }
 }
