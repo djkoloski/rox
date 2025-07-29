@@ -4,7 +4,7 @@ mod error;
 mod executable;
 mod globals;
 mod memory;
-mod object;
+mod objects;
 mod op;
 pub mod rle;
 mod value;
@@ -17,7 +17,7 @@ pub use self::{
     executable::*,
     globals::*,
     memory::*,
-    object::*,
+    objects::*,
     op::*,
     value::*,
     virtual_machine::*,

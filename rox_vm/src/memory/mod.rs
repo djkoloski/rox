@@ -1,21 +1,49 @@
-use core::cell::Cell;
+mod object;
+
+use core::{borrow::Borrow, cell::Cell, hash};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+pub use self::object::Handle;
+use self::object::{HandleOperation, ObjectHandle, ObjectKind};
 use crate::{
-    Closure, ErasedHandle, Handle, ObjectKind, RuntimeError, String, Upvalue,
-    Value, global_values,
+    Closure, Emplace, NewClosure, RuntimeError, String, Upvalue, Value,
+    global_values,
 };
 
 const MAX_STACK_LEN: usize = 255;
+
+struct InternedString {
+    handle: Handle<String>,
+}
+
+impl hash::Hash for InternedString {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        self.handle.get().as_str().hash(state)
+    }
+}
+
+impl PartialEq for InternedString {
+    fn eq(&self, other: &Self) -> bool {
+        self.handle.as_str() == other.handle.as_str()
+    }
+}
+
+impl Eq for InternedString {}
+
+impl Borrow<str> for InternedString {
+    fn borrow(&self) -> &str {
+        self.handle.as_str()
+    }
+}
 
 pub struct Memory {
     globals: HashMap<std::string::String, Value>,
     stack: Box<[Cell<Value>; MAX_STACK_LEN]>,
     stack_len: usize,
-    handles: Option<ErasedHandle>,
+    handles: Option<ObjectHandle>,
     open_upvalues: BTreeMap<usize, Handle<Upvalue>>,
 
-    strings: HashSet<Handle<String>>,
+    strings: HashSet<InternedString>,
     bytes_allocated: usize,
     next_gc: usize,
 }
@@ -24,8 +52,9 @@ impl Drop for Memory {
     fn drop(&mut self) {
         self.strings.clear();
 
-        while let Some(handle) = self.handles.clone() {
-            self.handles = unsafe { handle.gc_sweep() };
+        while let Some(handle) = self.handles {
+            self.handles = handle.gc_next();
+            handle.operate(DestroyOp { memory: self });
         }
     }
 }
@@ -116,17 +145,6 @@ impl Memory {
         Ok(())
     }
 
-    pub fn intern_string(&mut self, s: &str) -> Handle<String> {
-        if let Some(handle) = self.strings.get(s) {
-            handle.clone()
-        } else {
-            let handle =
-                self.track_handle(|next| Handle::create_string(next, s));
-            self.strings.insert(handle.clone());
-            handle
-        }
-    }
-
     pub fn push(&mut self, value: Value) -> Result<(), RuntimeError> {
         if self.stack_len == MAX_STACK_LEN {
             return Err(RuntimeError::StackOverflow);
@@ -152,14 +170,36 @@ impl Memory {
         Ok(self.stack[self.stack_len - 1].get())
     }
 
+    pub fn intern_string(&mut self, s: &str) -> Handle<String> {
+        if let Some(interned) = self.strings.get(s) {
+            interned.handle
+        } else {
+            let handle = self.create_object(s);
+            self.strings.insert(InternedString { handle });
+            handle
+        }
+    }
+
     pub fn create_closure(
         &mut self,
         function_index: usize,
         upvalues: Vec<Handle<Upvalue>>,
     ) -> Handle<Closure> {
-        self.track_handle(|next| {
-            Handle::create_closure(next, function_index, upvalues)
+        self.create_object(NewClosure {
+            function_index,
+            upvalues,
         })
+    }
+
+    pub fn capture_upvalue(&mut self, stack_index: usize) -> Handle<Upvalue> {
+        if let Some(open_upvalue) = self.open_upvalues.get(&stack_index) {
+            *open_upvalue
+        } else {
+            let location = &self.stack[stack_index] as *const _;
+            let upvalue = self.create_object(location);
+            self.open_upvalues.insert(stack_index, upvalue);
+            upvalue
+        }
     }
 
     pub fn close_upvalues_ge(&mut self, stack_index: usize) {
@@ -171,36 +211,6 @@ impl Memory {
         }
     }
 
-    pub fn capture_upvalue(&mut self, stack_index: usize) -> Handle<Upvalue> {
-        if let Some(open_upvalue) = self.open_upvalues.get(&stack_index) {
-            open_upvalue.clone()
-        } else {
-            let location = &self.stack[stack_index] as *const _;
-            let upvalue = self.track_handle(|next| unsafe {
-                Handle::create_upvalue(next, location)
-            });
-            self.open_upvalues.insert(stack_index, upvalue.clone());
-            upvalue
-        }
-    }
-
-    fn track_handle<T: ObjectKind + ?Sized>(
-        &mut self,
-        f: impl FnOnce(Option<ErasedHandle>) -> Handle<T>,
-    ) -> Handle<T> {
-        if self.bytes_allocated > self.next_gc || cfg!(feature = "debug_gc") {
-            self.collect_garbage();
-        }
-
-        let handle = f(self.handles.clone());
-
-        let erased = Handle::erase(handle.clone());
-        self.bytes_allocated += erased.gc_layout().size();
-        self.handles = Some(erased);
-
-        handle
-    }
-
     fn collect_garbage(&mut self) {
         #[cfg(feature = "debug_gc")]
         println!("-- gc begin");
@@ -208,15 +218,19 @@ impl Memory {
         let mut frontier = Vec::new();
 
         for global in self.globals.values() {
-            global.gc_mark(&mut frontier);
+            if let Some(handle) = value_to_object_handle(*global) {
+                handle.gc_mark(&mut frontier);
+            }
         }
 
         for i in 0..self.stack_len {
-            self.stack[i].get().gc_mark(&mut frontier);
+            if let Some(handle) = value_to_object_handle(self.stack[i].get()) {
+                handle.gc_mark(&mut frontier);
+            }
         }
 
         for upvalue in self.open_upvalues.values() {
-            upvalue.gc_mark(&mut frontier);
+            Handle::erase(*upvalue).gc_mark(&mut frontier);
         }
 
         while let Some(last) = frontier.pop() {
@@ -224,24 +238,28 @@ impl Memory {
         }
 
         let mut previous = None;
-        let mut current = self.handles.clone();
+        let mut current = self.handles;
         while let Some(current_handle) = current.take() {
             if current_handle.gc_is_marked() {
                 current_handle.gc_unmark();
-                previous = Some(current_handle.clone());
+                previous = Some(current_handle);
                 current = current_handle.gc_next();
             } else {
-                if let Some(string_handle) =
-                    current_handle.clone().downcast::<String>()
+                current = current_handle.gc_next();
+
+                if let Some(string_handle) = current_handle.downcast::<String>()
                 {
-                    self.strings.remove(&string_handle);
+                    self.strings.remove(&InternedString {
+                        handle: string_handle,
+                    });
                 }
-                self.bytes_allocated -= current_handle.gc_layout().size();
-                current = unsafe { current_handle.gc_sweep() };
+
+                current_handle.operate(DestroyOp { memory: self });
+
                 if let Some(previous_handle) = previous.as_mut() {
-                    previous_handle.gc_set_next(current.clone());
+                    previous_handle.gc_set_next(current);
                 } else {
-                    self.handles = current.clone();
+                    self.handles = current;
                 }
             }
         }
@@ -250,5 +268,57 @@ impl Memory {
 
         #[cfg(feature = "debug_gc")]
         println!("-- gc end");
+    }
+
+    fn create_object<T: ObjectKind + ?Sized>(
+        &mut self,
+        emplacer: impl Emplace<T>,
+    ) -> Handle<T> {
+        if self.bytes_allocated > self.next_gc || cfg!(feature = "debug_gc") {
+            self.collect_garbage();
+        }
+
+        let handle = Handle::create(emplacer, self.handles);
+
+        self.bytes_allocated += Handle::object_layout(handle).size();
+        self.handles = Some(Handle::erase(handle));
+
+        handle
+    }
+
+    unsafe fn destroy_object<T: ObjectKind + ?Sized>(
+        &mut self,
+        handle: Handle<T>,
+    ) {
+        self.bytes_allocated -= Handle::object_layout(handle).size();
+
+        unsafe {
+            Handle::destroy(handle);
+        }
+    }
+}
+
+struct DestroyOp<'a> {
+    memory: &'a mut Memory,
+}
+
+impl<T: ObjectKind + ?Sized> HandleOperation<T> for DestroyOp<'_> {
+    fn operate(self, handle: Handle<T>) {
+        unsafe {
+            self.memory.destroy_object(handle);
+        }
+    }
+}
+
+fn value_to_object_handle(value: Value) -> Option<ObjectHandle> {
+    match value.unpack() {
+        crate::UnpackedValue::Float(_)
+        | crate::UnpackedValue::Register(_)
+        | crate::UnpackedValue::Nil
+        | crate::UnpackedValue::False
+        | crate::UnpackedValue::True
+        | crate::UnpackedValue::NativeFunction(_) => None,
+        crate::UnpackedValue::String(handle) => Some(Handle::erase(handle)),
+        crate::UnpackedValue::Closure(handle) => Some(Handle::erase(handle)),
     }
 }

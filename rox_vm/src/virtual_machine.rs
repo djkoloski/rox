@@ -118,7 +118,7 @@ impl<'exe> VirtualMachine<'exe> {
             return Err(RuntimeError::UpvalueOutOfBounds { upvalue_index });
         };
 
-        Ok(upvalue.clone())
+        Ok(*upvalue)
     }
 
     fn capture(
@@ -131,7 +131,7 @@ impl<'exe> VirtualMachine<'exe> {
                 self.memory.capture_upvalue(stack_index)
             }
             Place::Upvalue { upvalue_index } => {
-                self.get_upvalue(*upvalue_index)?.clone()
+                self.get_upvalue(*upvalue_index)?
             }
         })
     }

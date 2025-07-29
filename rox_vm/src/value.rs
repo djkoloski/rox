@@ -1,6 +1,6 @@
 use core::fmt;
 
-use crate::{Closure, ErasedHandle, Handle, String};
+use crate::{Closure, Handle, String};
 
 #[derive(Debug, PartialEq)]
 pub enum Constant {
@@ -128,7 +128,9 @@ impl Value {
 
     pub fn string(handle: Handle<String>) -> Self {
         Self {
-            bits: NAN_BITS | TAG_STRING | (handle.address() as u64 & DATA_BITS),
+            bits: NAN_BITS
+                | TAG_STRING
+                | (Handle::address(handle) as u64 & DATA_BITS),
         }
     }
 
@@ -136,7 +138,7 @@ impl Value {
         Self {
             bits: NAN_BITS
                 | TAG_CLOSURE
-                | (handle.address() as u64 & DATA_BITS),
+                | (Handle::address(handle) as u64 & DATA_BITS),
         }
     }
 
@@ -176,19 +178,6 @@ impl Value {
                 Handle::from_address(data as usize)
             }),
             _ => unreachable!(),
-        }
-    }
-
-    pub fn gc_mark(&self, frontier: &mut Vec<ErasedHandle>) {
-        match self.unpack() {
-            UnpackedValue::Closure(handle) => handle.gc_mark(frontier),
-            UnpackedValue::String(handle) => handle.gc_mark(frontier),
-            UnpackedValue::Register(_)
-            | UnpackedValue::Nil
-            | UnpackedValue::True
-            | UnpackedValue::False
-            | UnpackedValue::Float(_)
-            | UnpackedValue::NativeFunction(_) => (),
         }
     }
 }
