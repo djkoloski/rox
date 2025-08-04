@@ -130,6 +130,7 @@ ast! {
 
     #[accept = visit_this_expr]
     pub struct ThisExpr {
+        pub decoration: Decoration<NameDecoration>,
         pub this: This,
     }
 

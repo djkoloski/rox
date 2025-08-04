@@ -702,6 +702,7 @@ impl Parser {
                 }))
             }
             Token::This(_) => Some(Expr::This(ThisExpr {
+                decoration: self.decorator.decorate(),
                 this: self.assume(),
             })),
             Token::Super(_) => {

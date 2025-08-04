@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 
-use rox_diag::Spanned;
+use rox_diag::{Span, Spanned};
 use rox_lex::token_kind::Identifier;
 use rox_parse::{
-    Visit,
+    Decoration, NameDecoration, Visit,
     ast::{
         AssignExpr, BinaryExpr, BinaryOperator, BlockStmt, CallExpr,
         ClassDeclStmt, ExprStmt, FunDeclStmt, Function, GetExpr, IfStmt,
         Literal, LiteralExpr, PrintStmt, Program, ReturnStmt, SetExpr,
-        UnaryExpr, UnaryOperator, VarDeclStmt, VariableExpr, Visitor,
+        ThisExpr, UnaryExpr, UnaryOperator, VarDeclStmt, VariableExpr, Visitor,
         WhileStmt, visit,
     },
 };
@@ -81,6 +81,27 @@ impl<'ast> AssemblyPass<'ast> {
             let constant_index = self.add_string(identifier.value.clone());
             self.chunk
                 .encode(Op::define_global(constant_index), identifier.span());
+        }
+    }
+
+    fn resolve(
+        &mut self,
+        decoration: Decoration<NameDecoration>,
+        span: Span,
+        identifier: Option<&'ast Identifier>,
+    ) {
+        match self.resolutions[decoration.index()] {
+            Resolution::Local { local_index } => {
+                self.chunk.encode(Op::get_local(local_index), span);
+            }
+            Resolution::Upvalue { upvalue_index } => {
+                self.chunk.encode(Op::get_upvalue(upvalue_index), span);
+            }
+            Resolution::Global => {
+                let constant_index =
+                    self.add_string(identifier.unwrap().value.clone());
+                self.chunk.encode(Op::get_global(constant_index), span);
+            }
         }
     }
 }
@@ -190,22 +211,11 @@ impl<'ast> Visitor<'ast> for AssemblyPass<'ast> {
     }
 
     fn visit_variable_expr(&mut self, node: &'ast VariableExpr) {
-        match self.resolutions[node.name.decoration.index()] {
-            Resolution::Local { local_index } => {
-                self.chunk
-                    .encode(Op::get_local(local_index), node.name.span());
-            }
-            Resolution::Upvalue { upvalue_index } => {
-                self.chunk
-                    .encode(Op::get_upvalue(upvalue_index), node.name.span());
-            }
-            Resolution::Global => {
-                let constant_index =
-                    self.add_string(node.name.identifier.value.clone());
-                self.chunk
-                    .encode(Op::get_global(constant_index), node.name.span());
-            }
-        }
+        self.resolve(
+            node.name.decoration,
+            node.span(),
+            Some(&node.name.identifier),
+        );
     }
 
     fn visit_assign_expr(&mut self, node: &'ast AssignExpr) {
@@ -360,5 +370,9 @@ impl<'ast> Visitor<'ast> for AssemblyPass<'ast> {
         let field_name = self.add_string(node.field.value.clone());
         self.chunk
             .encode(Op::set_field(field_name), node.field.span());
+    }
+
+    fn visit_this_expr(&mut self, node: &'ast ThisExpr) {
+        self.resolve(node.decoration, node.span(), None);
     }
 }

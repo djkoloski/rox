@@ -68,6 +68,7 @@ impl<'exe> VirtualMachine<'exe> {
             self.memory.pop()?;
         }
 
+        let _callee = self.memory.pop()?;
         let return_ip = self.memory.pop()?.as_register();
         let return_fp = self.memory.pop()?.as_register();
 
@@ -283,6 +284,7 @@ impl<'exe> VirtualMachine<'exe> {
                 Op::PushFrame => {
                     self.memory.push(Value::register(0))?;
                     self.memory.push(Value::register(0))?;
+                    self.memory.push(Value::nil())?;
                 }
                 Op::Call { arity } => {
                     if self.memory.stack_len() <= self.fp + arity {
@@ -290,16 +292,19 @@ impl<'exe> VirtualMachine<'exe> {
                     }
 
                     let next_fp = self.memory.stack_len() - arity - 1;
+                    let target = self.memory.read_stack(next_fp)?;
+
                     self.memory.write_stack(
-                        next_fp - 2,
+                        next_fp - 3,
                         Value::register(self.fp as u64),
                     )?;
                     self.memory.write_stack(
-                        next_fp - 1,
+                        next_fp - 2,
                         Value::register(next_ip as u64),
                     )?;
+                    self.memory.write_stack(next_fp - 1, target)?;
+
                     self.fp = next_fp;
-                    let target = self.memory.read_stack(self.fp)?;
 
                     match target.unpack() {
                         UnpackedValue::Closure(closure) => {
@@ -324,6 +329,10 @@ impl<'exe> VirtualMachine<'exe> {
                             self.memory.push(Value::instance(instance))?;
                         }
                         UnpackedValue::BoundMethod(bound_method) => {
+                            self.memory.write_stack(
+                                self.fp,
+                                Value::instance(bound_method.receiver),
+                            )?;
                             let function = &self.executable.functions
                                 [bound_method.method.function_index];
                             next_ip = function.ip;
@@ -502,6 +511,7 @@ impl<'exe> VirtualMachine<'exe> {
         enum StackKind {
             Frame(usize),
             Return(usize),
+            Callee(Value),
             Value(Value),
         }
 
@@ -510,14 +520,15 @@ impl<'exe> VirtualMachine<'exe> {
             i: usize,
         ) -> Result<StackKind, RuntimeError> {
             let mut fp = vm.fp;
-            while i + 2 < fp {
-                fp = vm.memory.read_stack(fp - 2)?.as_register() as usize;
+            while i + 3 < fp {
+                fp = vm.memory.read_stack(fp - 3)?.as_register() as usize;
             }
 
             let value = vm.memory.read_stack(i)?;
-            Ok(match i + 2 - fp {
+            Ok(match i + 3 - fp {
                 0 => StackKind::Frame(value.as_register() as usize),
                 1 => StackKind::Return(value.as_register() as usize),
+                2 => StackKind::Callee(value),
                 _ => StackKind::Value(value),
             })
         }
@@ -535,7 +546,7 @@ impl<'exe> VirtualMachine<'exe> {
                     print!("        #{frame}: ");
                     frame += 1;
                 }
-                StackKind::Value(v) => {
+                StackKind::Callee(v) | StackKind::Value(v) => {
                     if v == Value::register(0) {
                         print!(" => ");
                         i += 1;

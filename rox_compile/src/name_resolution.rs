@@ -4,10 +4,10 @@ use std::collections::{HashMap, hash_map::Entry};
 use rox_diag::{Span, Spanned as _};
 use rox_lex::token_kind::Identifier;
 use rox_parse::{
-    Ast, BlockDecoration, ClassDecoration, Dec, FunctionDecoration,
+    Ast, BlockDecoration, ClassDecoration, Dec, Decoration, FunctionDecoration,
     NameDecoration, Visit as _,
     ast::{
-        AssignExpr, BlockStmt, ClassDeclStmt, FunDeclStmt, Function, Name,
+        AssignExpr, BlockStmt, ClassDeclStmt, FunDeclStmt, Function, ThisExpr,
         VarDeclStmt, VariableExpr, Visitor, visit,
     },
 };
@@ -60,37 +60,45 @@ pub struct NameResolutionOutput<'ast> {
     pub errors: Vec<CompileError>,
 }
 
-struct Ident<'ast> {
-    identifier: &'ast Identifier,
+#[derive(Clone, Copy)]
+enum Name<'ast> {
+    Ident(&'ast Identifier),
+    This(Span),
 }
 
-impl<'ast> Ident<'ast> {
+impl<'ast> Name<'ast> {
     fn as_str(&self) -> &'ast str {
-        &self.identifier.value
+        match self {
+            Self::Ident(identifier) => &identifier.value,
+            Self::This(_) => "this",
+        }
     }
 
     fn span(&self) -> Span {
-        self.identifier.span()
+        match self {
+            Self::Ident(identifier) => identifier.span(),
+            Self::This(span) => *span,
+        }
     }
 }
 
-impl hash::Hash for Ident<'_> {
+impl hash::Hash for Name<'_> {
     fn hash<H: hash::Hasher>(&self, state: &mut H) {
         self.as_str().hash(state);
     }
 }
 
-impl PartialEq for Ident<'_> {
+impl PartialEq for Name<'_> {
     fn eq(&self, other: &Self) -> bool {
         self.as_str() == other.as_str()
     }
 }
 
-impl Eq for Ident<'_> {}
+impl Eq for Name<'_> {}
 
 struct Scope<'ast> {
     block: &'ast BlockStmt,
-    ident_to_local_decl: HashMap<Ident<'ast>, usize>,
+    name_to_local_decl: HashMap<Name<'ast>, usize>,
     local_decls: Vec<LocalDeclaration>,
 }
 
@@ -98,19 +106,17 @@ impl<'ast> Scope<'ast> {
     fn new(block: &'ast BlockStmt) -> Self {
         Self {
             block,
-            ident_to_local_decl: HashMap::new(),
+            name_to_local_decl: HashMap::new(),
             local_decls: Vec::new(),
         }
     }
 
     fn resolve(
         &mut self,
-        identifier: &'ast Identifier,
+        name: Name<'ast>,
         and_capture: bool,
     ) -> Option<usize> {
-        if let Some(&base_index) =
-            self.ident_to_local_decl.get(&Ident { identifier })
-        {
+        if let Some(&base_index) = self.name_to_local_decl.get(&name) {
             if and_capture {
                 self.local_decls[base_index] = LocalDeclaration::Capture;
             }
@@ -120,14 +126,12 @@ impl<'ast> Scope<'ast> {
         }
     }
 
-    fn declare(
-        &mut self,
-        identifier: &'ast Identifier,
-    ) -> Result<usize, CompileError> {
-        match self.ident_to_local_decl.entry(Ident { identifier }) {
+    fn declare(&mut self, name: Name<'ast>) -> Result<usize, CompileError> {
+        let span = name.span();
+        match self.name_to_local_decl.entry(name) {
             Entry::Occupied(occupied) => Err(CompileError::ItemRedefined {
                 original: occupied.key().span(),
-                redefinition: identifier.span(),
+                redefinition: span,
             }),
             Entry::Vacant(vacant) => {
                 let base_index = self.local_decls.len();
@@ -168,14 +172,14 @@ impl<'ast> Context<'ast> {
 
     fn resolve(
         &mut self,
-        identifier: &'ast Identifier,
+        name: Name<'ast>,
         and_capture: bool,
     ) -> Option<usize> {
         let mut base_index = self.local_count;
         for scope in self.scopes.iter_mut().rev() {
             base_index -= scope.local_decls.len();
 
-            if let Some(local_index) = scope.resolve(identifier, and_capture) {
+            if let Some(local_index) = scope.resolve(name, and_capture) {
                 return Some(base_index + local_index);
             }
         }
@@ -185,10 +189,10 @@ impl<'ast> Context<'ast> {
 
     fn declare(
         &mut self,
-        identifier: &'ast Identifier,
+        name: Name<'ast>,
     ) -> Option<Result<(), CompileError>> {
         if let Some(scope) = self.scopes.last_mut() {
-            if let Err(error) = scope.declare(identifier) {
+            if let Err(error) = scope.declare(name) {
                 Some(Err(error))
             } else {
                 self.local_count += 1;
@@ -203,15 +207,15 @@ impl<'ast> Context<'ast> {
 struct Frame<'ast> {
     function: &'ast Function,
     context: Context<'ast>,
-    name_to_capture_index: HashMap<Ident<'ast>, usize>,
+    name_to_capture_index: HashMap<Name<'ast>, usize>,
     captures: Vec<Place>,
 }
 
 impl<'ast> Frame<'ast> {
-    fn new(function: &'ast Function) -> Self {
+    fn new(function: &'ast Function, reserved: usize) -> Self {
         Self {
             function,
-            context: Context::with_reserved(1),
+            context: Context::with_reserved(reserved),
             name_to_capture_index: HashMap::new(),
             captures: Vec::new(),
         }
@@ -219,14 +223,13 @@ impl<'ast> Frame<'ast> {
 
     fn resolve(
         &mut self,
-        identifier: &'ast Identifier,
+        name: Name<'ast>,
         and_capture: bool,
     ) -> Option<Place> {
-        if let Some(local_index) = self.context.resolve(identifier, and_capture)
-        {
+        if let Some(local_index) = self.context.resolve(name, and_capture) {
             Some(Place::Local { local_index })
         } else if let Some(&upvalue_index) =
-            self.name_to_capture_index.get(&Ident { identifier })
+            self.name_to_capture_index.get(&name)
         {
             Some(Place::Upvalue { upvalue_index })
         } else {
@@ -234,23 +237,29 @@ impl<'ast> Frame<'ast> {
         }
     }
 
-    fn add_capture(
-        &mut self,
-        identifier: &'ast Identifier,
-        place: Place,
-    ) -> usize {
+    fn add_capture(&mut self, name: Name<'ast>, place: Place) -> usize {
         let upvalue_index = self.captures.len();
-        self.name_to_capture_index
-            .insert(Ident { identifier }, upvalue_index);
+        self.name_to_capture_index.insert(name, upvalue_index);
         self.captures.push(place);
         upvalue_index
     }
 
-    fn declare(
-        &mut self,
-        identifier: &'ast Identifier,
-    ) -> Result<(), CompileError> {
-        self.context.declare(identifier).unwrap()
+    fn declare(&mut self, name: Name<'ast>) -> Result<(), CompileError> {
+        self.context.declare(name).unwrap()
+    }
+}
+
+enum FrameKind {
+    Function,
+    Method,
+}
+
+impl FrameKind {
+    fn unused_reserved_names(&self) -> usize {
+        match self {
+            Self::Function => 1,
+            Self::Method => 0,
+        }
     }
 }
 
@@ -309,34 +318,27 @@ impl<'ast> NameResolutionPass<'ast> {
     fn propagate_capture(
         &mut self,
         frame: usize,
-        identifier: &'ast Identifier,
+        name: Name<'ast>,
         mut place: Place,
     ) -> Resolution {
         for frame in &mut self.frames[frame..] {
             place = Place::Upvalue {
-                upvalue_index: frame.add_capture(identifier, place),
+                upvalue_index: frame.add_capture(name, place),
             };
         }
 
         Resolution::from(place)
     }
 
-    fn resolve_identifier(
-        &mut self,
-        identifier: &'ast Identifier,
-    ) -> Resolution {
+    fn resolve_identifier(&mut self, name: Name<'ast>) -> Resolution {
         let mut frame_index = self.frames.len();
         let mut and_capture = false;
 
         while frame_index > 0 {
             if let Some(capture) =
-                self.frames[frame_index - 1].resolve(identifier, and_capture)
+                self.frames[frame_index - 1].resolve(name, and_capture)
             {
-                return self.propagate_capture(
-                    frame_index,
-                    identifier,
-                    capture,
-                );
+                return self.propagate_capture(frame_index, name, capture);
             }
 
             frame_index -= 1;
@@ -344,43 +346,58 @@ impl<'ast> NameResolutionPass<'ast> {
         }
 
         if let Some(local_index) =
-            self.global_context.resolve(identifier, and_capture)
+            self.global_context.resolve(name, and_capture)
         {
             return self.propagate_capture(
                 0,
-                identifier,
+                name,
                 Place::Local { local_index },
             );
-        }
-
-        if let Entry::Vacant(vacant) =
-            self.globals.entry(GlobalIdent::Identifier(identifier))
-        {
-            vacant.insert(GlobalResolution::Pending);
         }
 
         Resolution::Global
     }
 
-    fn resolve(&mut self, name: &'ast Name) {
-        let resolution = self.resolve_identifier(&name.identifier);
-        self.resolutions.insert(name.decoration, resolution);
+    fn resolve(
+        &mut self,
+        name: Name<'ast>,
+        decoration: Decoration<NameDecoration>,
+    ) {
+        let resolution = self.resolve_identifier(name);
+
+        if matches!(resolution, Resolution::Global) {
+            match name {
+                Name::Ident(identifier) => {
+                    if let Entry::Vacant(vacant) =
+                        self.globals.entry(GlobalIdent::Identifier(identifier))
+                    {
+                        vacant.insert(GlobalResolution::Pending);
+                    }
+                }
+                Name::This(span) => {
+                    self.errors.push(CompileError::UndefinedItem { span })
+                }
+            }
+        }
+
+        self.resolutions.insert(decoration, resolution);
     }
 
-    fn declare(&mut self, identifier: &'ast Identifier) {
+    fn declare(&mut self, name: Name<'ast>) {
         if let Some(last_frame) = self.frames.last_mut() {
-            if let Err(error) = last_frame.declare(identifier) {
+            if let Err(error) = last_frame.declare(name) {
                 self.errors.push(error);
             }
-        } else if let Some(result) = self.global_context.declare(identifier) {
+        } else if let Some(result) = self.global_context.declare(name) {
             if let Err(error) = result {
                 self.errors.push(error);
             }
-        } else if let Some(GlobalResolution::Resolved(original)) =
-            self.globals.insert(
-                GlobalIdent::Identifier(identifier),
-                GlobalResolution::Resolved(identifier.span()),
-            )
+        } else if let Name::Ident(identifier) = name
+            && let Some(GlobalResolution::Resolved(original)) =
+                self.globals.insert(
+                    GlobalIdent::Identifier(identifier),
+                    GlobalResolution::Resolved(identifier.span()),
+                )
         {
             self.errors.push(CompileError::ItemRedefined {
                 original,
@@ -407,11 +424,16 @@ impl<'ast> NameResolutionPass<'ast> {
             .insert(scope.block.decoration, scope.local_decls);
     }
 
-    fn push_frame(&mut self, function: &'ast Function) {
-        let mut frame = Frame::new(function);
+    fn push_frame(&mut self, function: &'ast Function, kind: FrameKind) {
+        let mut frame = Frame::new(function, kind.unused_reserved_names());
         frame.context.push_scope(&function.body);
+        if matches!(kind, FrameKind::Method)
+            && let Err(error) = frame.declare(Name::This(Span::null()))
+        {
+            self.errors.push(error);
+        }
         for param in function.params.iter() {
-            if let Err(error) = frame.declare(param) {
+            if let Err(error) = frame.declare(Name::Ident(param)) {
                 self.errors.push(error);
             }
         }
@@ -472,19 +494,19 @@ impl<'ast> NameResolutionPass<'ast> {
 
 impl<'ast> Visitor<'ast> for NameResolutionPass<'ast> {
     fn visit_variable_expr(&mut self, node: &'ast VariableExpr) {
-        self.resolve(&node.name);
+        self.resolve(Name::Ident(&node.name.identifier), node.name.decoration);
     }
 
     fn visit_assign_expr(&mut self, node: &'ast AssignExpr) {
         visit::visit_assign_expr(self, node);
 
-        self.resolve(&node.name);
+        self.resolve(Name::Ident(&node.name.identifier), node.name.decoration);
     }
 
     fn visit_var_decl_stmt(&mut self, node: &'ast VarDeclStmt) {
         visit::visit_var_decl_stmt(self, node);
 
-        self.declare(&node.identifier);
+        self.declare(Name::Ident(&node.identifier));
     }
 
     fn visit_block_stmt(&mut self, node: &'ast BlockStmt) {
@@ -496,9 +518,9 @@ impl<'ast> Visitor<'ast> for NameResolutionPass<'ast> {
     }
 
     fn visit_fun_decl_stmt(&mut self, node: &'ast FunDeclStmt) {
-        self.declare(&node.identifier);
+        self.declare(Name::Ident(&node.identifier));
 
-        self.push_frame(&node.function);
+        self.push_frame(&node.function, FrameKind::Function);
 
         visit::visit_block_stmt(self, &node.function.body);
 
@@ -506,11 +528,11 @@ impl<'ast> Visitor<'ast> for NameResolutionPass<'ast> {
     }
 
     fn visit_class_decl_stmt(&mut self, node: &'ast ClassDeclStmt) {
-        self.declare(&node.identifier);
+        self.declare(Name::Ident(&node.identifier));
 
         let mut methods = HashMap::new();
         for method in &node.methods {
-            self.push_frame(&method.function);
+            self.push_frame(&method.function, FrameKind::Method);
 
             visit::visit_block_stmt(self, &method.function.body);
 
@@ -529,5 +551,9 @@ impl<'ast> Visitor<'ast> for NameResolutionPass<'ast> {
                 methods,
             },
         );
+    }
+
+    fn visit_this_expr(&mut self, node: &'ast ThisExpr) {
+        self.resolve(Name::This(node.span()), node.decoration);
     }
 }
