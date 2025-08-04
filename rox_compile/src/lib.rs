@@ -48,6 +48,7 @@ pub fn compile(
     for class_info in class_infos {
         classes.push(ClassDef {
             name: class_info.identifier.value.clone(),
+            methods: class_info.methods,
         });
     }
 

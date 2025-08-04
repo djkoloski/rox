@@ -9,7 +9,7 @@ use core::{
 use std::alloc::{alloc, dealloc, handle_alloc_error};
 
 use crate::{
-    Class, Closure, Emplace, Instance, Pointee, String, Upvalue,
+    BoundMethod, Class, Closure, Emplace, Instance, Pointee, String, Upvalue,
     memory::value_to_object_handle,
 };
 
@@ -20,6 +20,7 @@ pub enum Tag {
     Upvalue,
     Class,
     Instance,
+    BoundMethod,
 }
 
 pub trait ObjectKind: Pointee {
@@ -31,7 +32,11 @@ pub trait ObjectKind: Pointee {
 impl ObjectKind for Class {
     const TAG: Tag = Tag::Class;
 
-    fn gc_explore(&self, _frontier: &mut Vec<ObjectHandle>) {}
+    fn gc_explore(&self, frontier: &mut Vec<ObjectHandle>) {
+        for method in self.methods.borrow().values() {
+            frontier.push(Handle::erase(*method));
+        }
+    }
 }
 
 impl ObjectKind for String {
@@ -71,6 +76,15 @@ impl ObjectKind for Instance {
                 frontier.push(handle);
             }
         }
+    }
+}
+
+impl ObjectKind for BoundMethod {
+    const TAG: Tag = Tag::BoundMethod;
+
+    fn gc_explore(&self, frontier: &mut Vec<ObjectHandle>) {
+        frontier.push(Handle::erase(self.receiver));
+        frontier.push(Handle::erase(self.method));
     }
 }
 
@@ -293,7 +307,8 @@ impl ObjectHandle {
             + HandleOperation<Closure>
             + HandleOperation<Upvalue>
             + HandleOperation<Class>
-            + HandleOperation<Instance>,
+            + HandleOperation<Instance>
+            + HandleOperation<BoundMethod>,
     {
         unsafe {
             match self.header().tag {
@@ -311,6 +326,9 @@ impl ObjectHandle {
                 }
                 Tag::Instance => {
                     operation.operate(self.downcast_unchecked::<Instance>())
+                }
+                Tag::BoundMethod => {
+                    operation.operate(self.downcast_unchecked::<BoundMethod>())
                 }
             }
         }

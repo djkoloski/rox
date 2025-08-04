@@ -16,6 +16,7 @@ pub struct FunctionDef {
 
 pub struct ClassDef {
     pub name: String,
+    pub methods: HashMap<String, usize>,
 }
 
 pub struct Executable {

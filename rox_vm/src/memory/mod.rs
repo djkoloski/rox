@@ -6,8 +6,9 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 pub use self::object::Handle;
 use self::object::{HandleOperation, ObjectHandle, ObjectKind};
 use crate::{
-    Class, Closure, Emplace, Instance, NewClass, NewClosure, NewInstance,
-    RuntimeError, String, Upvalue, Value, global_values,
+    BoundMethod, Class, Closure, Emplace, Instance, NewBoundMethod, NewClass,
+    NewClosure, NewInstance, RuntimeError, String, Upvalue, Value,
+    global_values,
 };
 
 const MAX_STACK_LEN: usize = 255;
@@ -213,6 +214,14 @@ impl Memory {
         self.create_object(NewInstance { class })
     }
 
+    pub fn create_bound_method(
+        &mut self,
+        receiver: Handle<Instance>,
+        method: Handle<Closure>,
+    ) -> Handle<BoundMethod> {
+        self.create_object(NewBoundMethod { receiver, method })
+    }
+
     pub fn close_upvalues_ge(&mut self, stack_index: usize) {
         while let Some(last) = self.open_upvalues.last_entry()
             && *last.key() >= stack_index
@@ -336,5 +345,8 @@ fn value_to_object_handle(value: Value) -> Option<ObjectHandle> {
         crate::UnpackedValue::Closure(handle) => Some(Handle::erase(handle)),
         crate::UnpackedValue::Class(handle) => Some(Handle::erase(handle)),
         crate::UnpackedValue::Instance(handle) => Some(Handle::erase(handle)),
+        crate::UnpackedValue::BoundMethod(handle) => {
+            Some(Handle::erase(handle))
+        }
     }
 }

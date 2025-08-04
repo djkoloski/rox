@@ -49,6 +49,7 @@ pub struct FunctionInfo<'ast> {
 
 pub struct ClassInfo<'ast> {
     pub identifier: &'ast Identifier,
+    pub methods: HashMap<String, usize>,
 }
 
 pub struct NameResolutionOutput<'ast> {
@@ -507,12 +508,25 @@ impl<'ast> Visitor<'ast> for NameResolutionPass<'ast> {
     fn visit_class_decl_stmt(&mut self, node: &'ast ClassDeclStmt) {
         self.declare(&node.identifier);
 
-        visit::visit_class_decl_stmt(self, node);
+        let mut methods = HashMap::new();
+        for method in &node.methods {
+            self.push_frame(&method.function);
+
+            visit::visit_block_stmt(self, &method.function.body);
+
+            self.pop_frame(&method.identifier);
+
+            methods.insert(
+                method.identifier.value.clone(),
+                method.function.decoration.index(),
+            );
+        }
 
         self.class_infos.insert(
             node.decoration,
             ClassInfo {
                 identifier: &node.identifier,
+                methods,
             },
         );
     }

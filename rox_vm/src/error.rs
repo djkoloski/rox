@@ -43,7 +43,7 @@ pub enum RuntimeError {
     ExpectedString { actual: UnpackedValue },
     ExpectedInstance { actual: UnpackedValue },
     ExpectedFloatOrString { actual: UnpackedValue },
-    ExpectedVariableName { actual: f64 },
+    ExpectedName { actual: f64 },
     ExpectedCallable { actual: UnpackedValue },
     GlobalAlreadyDefined { name: String, value: UnpackedValue },
     UndefinedGlobal { name: String },
@@ -99,8 +99,8 @@ impl fmt::Display for RuntimeError {
             Self::ExpectedFloatOrString { actual } => {
                 write!(f, "expected float or string, got {actual:?}")?;
             }
-            Self::ExpectedVariableName { actual } => {
-                write!(f, "expected a variable name, got {actual:?}")?;
+            Self::ExpectedName { actual } => {
+                write!(f, "expected a name, got {actual:?}")?;
             }
             Self::ExpectedCallable { actual } => {
                 write!(f, "expected callable, got {actual:?}")?;

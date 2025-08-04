@@ -1,3 +1,4 @@
+mod bound_method;
 mod class;
 mod closure;
 mod instance;
@@ -6,7 +7,9 @@ mod upvalue;
 
 use core::{alloc::Layout, ptr::slice_from_raw_parts_mut};
 
-pub use self::{class::*, closure::*, instance::*, string::*, upvalue::*};
+pub use self::{
+    bound_method::*, class::*, closure::*, instance::*, string::*, upvalue::*,
+};
 
 /// # Safety
 ///

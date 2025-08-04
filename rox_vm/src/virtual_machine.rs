@@ -1,8 +1,8 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
-    Codec, Constant, Executable, Handle, Memory, NativeFunction, Op, Place,
-    RuntimeDiagnostic, RuntimeError, UnpackedValue, Upvalue, Value,
+    Closure, Codec, Constant, Executable, Handle, Memory, NativeFunction, Op,
+    Place, RuntimeDiagnostic, RuntimeError, UnpackedValue, Upvalue, Value,
 };
 
 pub struct VirtualMachine<'exe> {
@@ -35,16 +35,14 @@ impl<'exe> VirtualMachine<'exe> {
             .ok_or(RuntimeError::ConstantOutOfBounds)
     }
 
-    fn get_variable_name(
+    fn get_name(
         &mut self,
         constant_index: usize,
     ) -> Result<&'exe String, RuntimeError> {
         let name = match self.get_constant(constant_index)? {
             Constant::String(name) => name,
             Constant::Float(actual) => {
-                return Err(RuntimeError::ExpectedVariableName {
-                    actual: *actual,
-                });
+                return Err(RuntimeError::ExpectedName { actual: *actual });
             }
         };
 
@@ -134,6 +132,20 @@ impl<'exe> VirtualMachine<'exe> {
                 self.get_upvalue(*upvalue_index)?
             }
         })
+    }
+
+    fn close_function(
+        &mut self,
+        function_index: usize,
+    ) -> Result<Handle<Closure>, RuntimeError> {
+        let function = &self.executable.functions[function_index];
+
+        let mut upvalues = Vec::new();
+        for place in &function.captures {
+            upvalues.push(self.capture(place)?);
+        }
+
+        Ok(self.memory.create_closure(function_index, upvalues))
     }
 
     pub fn execute(&mut self) -> Result<(), RuntimeDiagnostic> {
@@ -234,20 +246,20 @@ impl<'exe> VirtualMachine<'exe> {
                 }
                 Op::DefineGlobal { constant_index }
                 | Op::DefineGlobalLong { constant_index } => {
-                    let name = self.get_variable_name(constant_index)?;
+                    let name = self.get_name(constant_index)?;
                     let value = self.memory.pop()?;
 
                     self.memory.insert_global(name, value)?
                 }
                 Op::GetGlobal { constant_index }
                 | Op::GetGlobalLong { constant_index } => {
-                    let name = self.get_variable_name(constant_index)?;
+                    let name = self.get_name(constant_index)?;
                     let value = self.memory.read_global(name)?;
                     self.memory.push(value)?;
                 }
                 Op::SetGlobal { constant_index }
                 | Op::SetGlobalLong { constant_index } => {
-                    let name = self.get_variable_name(constant_index)?;
+                    let name = self.get_name(constant_index)?;
                     let value = self.memory.top()?;
                     self.memory.write_global(name, value)?;
                 }
@@ -311,6 +323,11 @@ impl<'exe> VirtualMachine<'exe> {
                             let instance = self.memory.create_instance(class);
                             self.memory.push(Value::instance(instance))?;
                         }
+                        UnpackedValue::BoundMethod(bound_method) => {
+                            let function = &self.executable.functions
+                                [bound_method.method.function_index];
+                            next_ip = function.ip;
+                        }
                         actual => {
                             return Err(RuntimeError::ExpectedCallable {
                                 actual,
@@ -320,15 +337,7 @@ impl<'exe> VirtualMachine<'exe> {
                 }
                 Op::CloseFunction { function_index }
                 | Op::CloseFunctionLong { function_index } => {
-                    let function = &self.executable.functions[function_index];
-
-                    let mut upvalues = Vec::new();
-                    for place in &function.captures {
-                        upvalues.push(self.capture(place)?);
-                    }
-
-                    let closure =
-                        self.memory.create_closure(function_index, upvalues);
+                    let closure = self.close_function(function_index)?;
                     self.memory.push(Value::closure(closure))?;
                 }
                 Op::CloseLocal => {
@@ -351,20 +360,19 @@ impl<'exe> VirtualMachine<'exe> {
                 Op::Class { class_index } | Op::ClassLong { class_index } => {
                     let class = self.memory.create_class(class_index);
                     self.memory.push(Value::class(class))?;
+
+                    let class_def = &self.executable.classes[class_index];
+                    for (name, function_index) in &class_def.methods {
+                        class.methods.borrow_mut().insert(
+                            name.clone(),
+                            self.close_function(*function_index)?,
+                        );
+                    }
                 }
                 Op::GetField { constant_index }
                 | Op::GetFieldLong { constant_index } => {
-                    // Check that the constant is a string
-                    match self.get_constant(constant_index)? {
-                        Constant::String(_) => (),
-                        Constant::Float(f) => {
-                            return Err(RuntimeError::ExpectedString {
-                                actual: UnpackedValue::Float(*f),
-                            });
-                        }
-                    }
+                    let field = self.get_name(constant_index)?;
 
-                    // Get the instance
                     let instance = self.memory.pop()?.unpack();
                     let UnpackedValue::Instance(instance) = instance else {
                         return Err(RuntimeError::ExpectedInstance {
@@ -372,27 +380,25 @@ impl<'exe> VirtualMachine<'exe> {
                         });
                     };
 
-                    // Look for the field by constant index
                     let fields = instance.fields.borrow();
-                    let Some(value) = fields.get(&constant_index) else {
+                    let value = if let Some(value) = fields.get(field) {
+                        *value
+                    } else if let Some(method) =
+                        instance.class.methods.borrow().get(field)
+                    {
+                        Value::bound_method(
+                            self.memory.create_bound_method(instance, *method),
+                        )
+                    } else {
                         return Err(RuntimeError::UndefinedField);
                     };
 
-                    self.memory.push(*value)?;
+                    self.memory.push(value)?;
                 }
                 Op::SetField { constant_index }
                 | Op::SetFieldLong { constant_index } => {
-                    // Check that the constant is a string
-                    match self.get_constant(constant_index)? {
-                        Constant::String(_) => (),
-                        Constant::Float(f) => {
-                            return Err(RuntimeError::ExpectedString {
-                                actual: UnpackedValue::Float(*f),
-                            });
-                        }
-                    }
+                    let field = self.get_name(constant_index)?;
 
-                    // Get the instance
                     let instance = self.memory.pop()?.unpack();
                     let UnpackedValue::Instance(instance) = instance else {
                         return Err(RuntimeError::ExpectedInstance {
@@ -400,11 +406,10 @@ impl<'exe> VirtualMachine<'exe> {
                         });
                     };
 
-                    // Set the field by constant index
                     instance
                         .fields
                         .borrow_mut()
-                        .insert(constant_index, self.memory.top()?);
+                        .insert(field.clone(), self.memory.top()?);
                 }
             }
             self.ip = next_ip;
@@ -434,6 +439,13 @@ impl<'exe> VirtualMachine<'exe> {
                 print!(
                     "<instance {}>",
                     self.executable.classes[i.class.class_index].name
+                )
+            }
+            UnpackedValue::BoundMethod(m) => {
+                print!(
+                    "<bound_method {}.{}>",
+                    self.executable.classes[m.receiver.class.class_index].name,
+                    self.executable.functions[m.method.function_index].name,
                 )
             }
             UnpackedValue::NativeFunction(f) => {
@@ -467,6 +479,13 @@ impl<'exe> VirtualMachine<'exe> {
                 print!(
                     "<instance {}>",
                     self.executable.classes[i.class.class_index].name
+                )
+            }
+            UnpackedValue::BoundMethod(m) => {
+                print!(
+                    "<bound_method {}.{}>",
+                    self.executable.classes[m.receiver.class.class_index].name,
+                    self.executable.functions[m.method.function_index].name,
                 )
             }
             UnpackedValue::NativeFunction(f) => {

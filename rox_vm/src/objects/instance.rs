@@ -6,7 +6,7 @@ use crate::{Class, Emplace, Handle, Pointee, Value};
 #[derive(Debug)]
 pub struct Instance {
     pub class: Handle<Class>,
-    pub fields: RefCell<HashMap<usize, Value>>,
+    pub fields: RefCell<HashMap<String, Value>>,
 }
 
 pub struct NewInstance {
