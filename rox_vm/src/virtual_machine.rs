@@ -166,13 +166,13 @@ impl<'exe> VirtualMachine<'exe> {
             .write_stack(next_fp - 3, Value::register(self.fp as u64))?;
         self.memory
             .write_stack(next_fp - 2, Value::register(*next_ip as u64))?;
-        self.memory.write_stack(next_fp - 1, target)?;
         self.memory.write_stack(next_fp, this)?;
 
         self.fp = next_fp;
 
         match target.unpack() {
             UnpackedValue::Closure(closure) => {
+                self.memory.write_stack(next_fp - 1, target)?;
                 let function =
                     &self.executable.functions[closure.function_index];
                 *next_ip = function.ip;
@@ -189,6 +189,10 @@ impl<'exe> VirtualMachine<'exe> {
                 self.memory
                     .write_stack(self.fp, Value::instance(instance))?;
                 if let Some(initializer) = class.methods.borrow().get("init") {
+                    self.memory.write_stack(
+                        next_fp - 1,
+                        Value::closure(*initializer),
+                    )?;
                     let function =
                         &self.executable.functions[initializer.function_index];
                     *next_ip = function.ip;
@@ -198,6 +202,10 @@ impl<'exe> VirtualMachine<'exe> {
                 }
             }
             UnpackedValue::BoundMethod(bound_method) => {
+                self.memory.write_stack(
+                    next_fp - 1,
+                    Value::closure(bound_method.method),
+                )?;
                 self.memory.write_stack(
                     self.fp,
                     Value::instance(bound_method.receiver),
@@ -588,14 +596,19 @@ impl<'exe> VirtualMachine<'exe> {
                     print!(" .. (fp={fp:04}, ");
                 }
                 StackKind::Return(ip) => {
-                    println!("ip={ip:04x})");
+                    print!("ip={ip:04x}, ");
+                }
+                StackKind::Callee(v) => {
+                    print!("callee=");
+                    self.debug_value(&v);
+                    println!(")");
                     print!("        #{frame}: ");
                     frame += 1;
                 }
-                StackKind::Callee(v) | StackKind::Value(v) => {
+                StackKind::Value(v) => {
                     if v == Value::register(0) {
                         print!(" => ");
-                        i += 1;
+                        i += 2;
                     } else {
                         print!("[");
                         self.debug_value(&v);
