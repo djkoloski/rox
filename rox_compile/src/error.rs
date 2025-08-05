@@ -6,6 +6,7 @@ use rox_diag::{Diagnostic, Formatter, Span};
 pub enum CompileError {
     UndefinedItem { span: Span },
     ItemRedefined { original: Span, redefinition: Span },
+    ReturnInInitializer { span: Span },
 }
 
 impl Diagnostic for CompileError {
@@ -33,6 +34,18 @@ impl Diagnostic for CompileError {
                 f.span_help(
                     *original,
                     format_args!("previously defined here"),
+                )?;
+            }
+            Self::ReturnInInitializer { span } => {
+                f.error(format_args!(
+                    "class initializers may not explicitly return because \
+                     they implicitly return `this`"
+                ))?;
+                f.span_error(
+                    *span,
+                    format_args!(
+                        "this return statement is in a class initializer"
+                    ),
                 )?;
             }
         }

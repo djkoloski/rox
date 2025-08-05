@@ -324,9 +324,21 @@ impl<'exe> VirtualMachine<'exe> {
                             self.memory.push(return_value)?;
                         }
                         UnpackedValue::Class(class) => {
-                            self.pop_frame()?;
                             let instance = self.memory.create_instance(class);
-                            self.memory.push(Value::instance(instance))?;
+                            self.memory.write_stack(
+                                self.fp,
+                                Value::instance(instance),
+                            )?;
+                            if let Some(initializer) =
+                                class.methods.borrow().get("init")
+                            {
+                                let function = &self.executable.functions
+                                    [initializer.function_index];
+                                next_ip = function.ip;
+                            } else {
+                                self.pop_frame()?;
+                                self.memory.push(Value::instance(instance))?;
+                            }
                         }
                         UnpackedValue::BoundMethod(bound_method) => {
                             self.memory.write_stack(

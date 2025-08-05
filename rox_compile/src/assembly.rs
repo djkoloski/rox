@@ -61,6 +61,16 @@ impl<'ast> AssemblyPass<'ast> {
         self.chunk.encode(Op::Return, function.body.rbrace.span());
     }
 
+    pub fn compile_initializer(mut self, function: &'ast Function) {
+        self.is_at_global_scope = false;
+
+        visit::visit_block_stmt(&mut self, &function.body);
+
+        self.chunk
+            .encode(Op::get_local(0), function.body.rbrace.span());
+        self.chunk.encode(Op::Return, function.body.rbrace.span());
+    }
+
     fn add_float(&mut self, float: f64) -> usize {
         self.chunk.add_constant(Constant::Float(float))
     }

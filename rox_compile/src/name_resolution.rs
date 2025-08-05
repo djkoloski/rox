@@ -7,8 +7,8 @@ use rox_parse::{
     Ast, BlockDecoration, ClassDecoration, Dec, Decoration, FunctionDecoration,
     NameDecoration, Visit as _,
     ast::{
-        AssignExpr, BlockStmt, ClassDeclStmt, FunDeclStmt, Function, ThisExpr,
-        VarDeclStmt, VariableExpr, Visitor, visit,
+        AssignExpr, BlockStmt, ClassDeclStmt, FunDeclStmt, Function,
+        ReturnStmt, ThisExpr, VarDeclStmt, VariableExpr, Visitor, visit,
     },
 };
 use rox_vm::{Place, global_names};
@@ -45,6 +45,7 @@ pub struct FunctionInfo<'ast> {
     pub identifier: &'ast Identifier,
     pub function: &'ast Function,
     pub captures: Vec<Place>,
+    pub kind: FrameKind,
 }
 
 pub struct ClassInfo<'ast> {
@@ -209,15 +210,17 @@ struct Frame<'ast> {
     context: Context<'ast>,
     name_to_capture_index: HashMap<Name<'ast>, usize>,
     captures: Vec<Place>,
+    kind: FrameKind,
 }
 
 impl<'ast> Frame<'ast> {
-    fn new(function: &'ast Function, reserved: usize) -> Self {
+    fn new(function: &'ast Function, kind: FrameKind) -> Self {
         Self {
             function,
-            context: Context::with_reserved(reserved),
+            context: Context::with_reserved(kind.unused_reserved_names()),
             name_to_capture_index: HashMap::new(),
             captures: Vec::new(),
+            kind,
         }
     }
 
@@ -249,9 +252,11 @@ impl<'ast> Frame<'ast> {
     }
 }
 
-enum FrameKind {
+#[derive(Clone, Copy)]
+pub enum FrameKind {
     Function,
     Method,
+    Initializer,
 }
 
 impl FrameKind {
@@ -259,6 +264,7 @@ impl FrameKind {
         match self {
             Self::Function => 1,
             Self::Method => 0,
+            Self::Initializer => 0,
         }
     }
 }
@@ -425,9 +431,9 @@ impl<'ast> NameResolutionPass<'ast> {
     }
 
     fn push_frame(&mut self, function: &'ast Function, kind: FrameKind) {
-        let mut frame = Frame::new(function, kind.unused_reserved_names());
+        let mut frame = Frame::new(function, kind);
         frame.context.push_scope(&function.body);
-        if matches!(kind, FrameKind::Method)
+        if matches!(kind, FrameKind::Method | FrameKind::Initializer)
             && let Err(error) = frame.declare(Name::This(Span::null()))
         {
             self.errors.push(error);
@@ -450,8 +456,13 @@ impl<'ast> NameResolutionPass<'ast> {
                 identifier,
                 function: frame.function,
                 captures: frame.captures,
+                kind: frame.kind,
             },
         );
+    }
+
+    fn frame_kind(&self) -> Option<FrameKind> {
+        Some(self.frames.last()?.kind)
     }
 
     pub fn compile(ast: &'ast Ast) -> NameResolutionOutput<'ast> {
@@ -532,7 +543,12 @@ impl<'ast> Visitor<'ast> for NameResolutionPass<'ast> {
 
         let mut methods = HashMap::new();
         for method in &node.methods {
-            self.push_frame(&method.function, FrameKind::Method);
+            let kind = if method.identifier.value == "init" {
+                FrameKind::Initializer
+            } else {
+                FrameKind::Method
+            };
+            self.push_frame(&method.function, kind);
 
             visit::visit_block_stmt(self, &method.function.body);
 
@@ -555,5 +571,12 @@ impl<'ast> Visitor<'ast> for NameResolutionPass<'ast> {
 
     fn visit_this_expr(&mut self, node: &'ast ThisExpr) {
         self.resolve(Name::This(node.span()), node.decoration);
+    }
+
+    fn visit_return_stmt(&mut self, node: &'ast ReturnStmt) {
+        if let Some(FrameKind::Initializer) = self.frame_kind() {
+            self.errors
+                .push(CompileError::ReturnInInitializer { span: node.span() });
+        }
     }
 }

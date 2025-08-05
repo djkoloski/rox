@@ -40,8 +40,15 @@ pub fn compile(
             ip: chunk.bytes().len(),
             captures: function_info.captures,
         });
-        AssemblyPass::new(&resolutions, &block_locals, &mut chunk)
-            .compile_function(function_info.function);
+        let pass = AssemblyPass::new(&resolutions, &block_locals, &mut chunk);
+        match function_info.kind {
+            FrameKind::Function | FrameKind::Method => {
+                pass.compile_function(function_info.function)
+            }
+            FrameKind::Initializer => {
+                pass.compile_initializer(function_info.function)
+            }
+        }
     }
 
     let mut classes = Vec::new();
