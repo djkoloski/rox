@@ -231,18 +231,33 @@ define_ops! {
             #[codec(U24)]
             constant_index: usize,
         },
+        Invoke {
+            #[codec(U8)]
+            constant_index: usize,
+            #[codec(U8)]
+            arity: usize,
+        },
+        InvokeLong {
+            #[codec(U24)]
+            constant_index: usize,
+            #[codec(U8)]
+            arity: usize,
+        },
     }
 }
 
 macro_rules! long_ops {
-    ($($fn:ident: $field:ident => $short:ident, $long:ident);* $(;)?) => {
+    ($(
+        $fn:ident: $field:ident $(, $rest:ident: $rest_ty:ty)* $(,)?
+        => $short:ident, $long:ident
+    );* $(;)?) => {
         impl Op {
             $(
-                pub fn $fn($field: usize) -> Self {
+                pub fn $fn($field: usize $(, $rest: $rest_ty)*) -> Self {
                     if $field <= U8::MAX {
-                        Self::$short { $field }
+                        Self::$short { $field $(, $rest)* }
                     } else if $field <= U24::MAX {
-                        Self::$long { $field }
+                        Self::$long { $field $(, $rest)* }
                     } else {
                         panic!(
                             ::core::concat!(
@@ -272,4 +287,5 @@ long_ops! {
     class: class_index => Class, ClassLong;
     get_field: constant_index => GetField, GetFieldLong;
     set_field: constant_index => SetField, SetFieldLong;
+    invoke: constant_index, arity: usize => Invoke, InvokeLong;
 }

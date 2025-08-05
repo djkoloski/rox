@@ -6,7 +6,7 @@ use rox_parse::{
     Decoration, NameDecoration, Visit,
     ast::{
         AssignExpr, BinaryExpr, BinaryOperator, BlockStmt, CallExpr,
-        ClassDeclStmt, ExprStmt, FunDeclStmt, Function, GetExpr, IfStmt,
+        ClassDeclStmt, Expr, ExprStmt, FunDeclStmt, Function, GetExpr, IfStmt,
         Literal, LiteralExpr, PrintStmt, Program, ReturnStmt, SetExpr,
         ThisExpr, UnaryExpr, UnaryOperator, VarDeclStmt, VariableExpr, Visitor,
         WhileStmt, visit,
@@ -349,14 +349,25 @@ impl<'ast> Visitor<'ast> for AssemblyPass<'ast> {
     fn visit_call_expr(&mut self, node: &'ast CallExpr) {
         self.chunk.encode(Op::PushFrame, node.span());
 
-        visit::visit_call_expr(self, node);
+        if let Expr::Get(get_expr) = &*node.target {
+            get_expr.target.accept(self);
+            node.arguments.accept(self);
 
-        self.chunk.encode(
-            Op::Call {
-                arity: node.arguments.len(),
-            },
-            node.span(),
-        );
+            let field_name = self.add_string(get_expr.field.value.clone());
+            self.chunk.encode(
+                Op::invoke(field_name, node.arguments.len()),
+                node.span(),
+            );
+        } else {
+            visit::visit_call_expr(self, node);
+
+            self.chunk.encode(
+                Op::Call {
+                    arity: node.arguments.len(),
+                },
+                node.span(),
+            );
+        }
     }
 
     fn visit_class_decl_stmt(&mut self, node: &'ast ClassDeclStmt) {

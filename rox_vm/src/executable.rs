@@ -109,6 +109,17 @@ impl Executable {
             | Op::SetUpvalueLong { upvalue_index } => {
                 print!(" {upvalue_index}");
             }
+            Op::Invoke {
+                constant_index,
+                arity,
+            }
+            | Op::InvokeLong {
+                constant_index,
+                arity,
+            } => {
+                let value = &self.chunk.constants()[constant_index];
+                print!(" {value}({arity})");
+            }
         }
 
         println!();

@@ -108,7 +108,7 @@ impl<'exe> VirtualMachine<'exe> {
         upvalue_index: usize,
     ) -> Result<Handle<Upvalue>, RuntimeError> {
         let UnpackedValue::Closure(closure) =
-            self.memory.read_stack(self.fp)?.unpack()
+            self.memory.read_stack(self.fp - 1)?.unpack()
         else {
             return Err(RuntimeError::UpvalueAtGlobalScope);
         };
@@ -147,6 +147,71 @@ impl<'exe> VirtualMachine<'exe> {
         }
 
         Ok(self.memory.create_closure(function_index, upvalues))
+    }
+
+    fn call(
+        &mut self,
+        this: Value,
+        arity: usize,
+        next_ip: &mut usize,
+    ) -> Result<(), RuntimeError> {
+        if self.memory.stack_len() <= self.fp + arity {
+            return Err(RuntimeError::TooFewArguments { arity });
+        }
+
+        let next_fp = self.memory.stack_len() - arity - 1;
+        let target = self.memory.read_stack(next_fp)?;
+
+        self.memory
+            .write_stack(next_fp - 3, Value::register(self.fp as u64))?;
+        self.memory
+            .write_stack(next_fp - 2, Value::register(*next_ip as u64))?;
+        self.memory.write_stack(next_fp - 1, target)?;
+        self.memory.write_stack(next_fp, this)?;
+
+        self.fp = next_fp;
+
+        match target.unpack() {
+            UnpackedValue::Closure(closure) => {
+                let function =
+                    &self.executable.functions[closure.function_index];
+                *next_ip = function.ip;
+            }
+            UnpackedValue::NativeFunction(native_function_index) => {
+                let native_function =
+                    NativeFunction::try_from(native_function_index)?;
+                let return_value = self.call_native(native_function)?;
+                self.pop_frame()?;
+                self.memory.push(return_value)?;
+            }
+            UnpackedValue::Class(class) => {
+                let instance = self.memory.create_instance(class);
+                self.memory
+                    .write_stack(self.fp, Value::instance(instance))?;
+                if let Some(initializer) = class.methods.borrow().get("init") {
+                    let function =
+                        &self.executable.functions[initializer.function_index];
+                    *next_ip = function.ip;
+                } else {
+                    self.pop_frame()?;
+                    self.memory.push(Value::instance(instance))?;
+                }
+            }
+            UnpackedValue::BoundMethod(bound_method) => {
+                self.memory.write_stack(
+                    self.fp,
+                    Value::instance(bound_method.receiver),
+                )?;
+                let function = &self.executable.functions
+                    [bound_method.method.function_index];
+                *next_ip = function.ip;
+            }
+            actual => {
+                return Err(RuntimeError::ExpectedCallable { actual });
+            }
+        }
+
+        Ok(())
     }
 
     pub fn execute(&mut self) -> Result<(), RuntimeDiagnostic> {
@@ -287,74 +352,7 @@ impl<'exe> VirtualMachine<'exe> {
                     self.memory.push(Value::nil())?;
                 }
                 Op::Call { arity } => {
-                    if self.memory.stack_len() <= self.fp + arity {
-                        return Err(RuntimeError::TooFewArguments { arity });
-                    }
-
-                    let next_fp = self.memory.stack_len() - arity - 1;
-                    let target = self.memory.read_stack(next_fp)?;
-
-                    self.memory.write_stack(
-                        next_fp - 3,
-                        Value::register(self.fp as u64),
-                    )?;
-                    self.memory.write_stack(
-                        next_fp - 2,
-                        Value::register(next_ip as u64),
-                    )?;
-                    self.memory.write_stack(next_fp - 1, target)?;
-
-                    self.fp = next_fp;
-
-                    match target.unpack() {
-                        UnpackedValue::Closure(closure) => {
-                            let function = &self.executable.functions
-                                [closure.function_index];
-                            next_ip = function.ip;
-                        }
-                        UnpackedValue::NativeFunction(
-                            native_function_index,
-                        ) => {
-                            let native_function = NativeFunction::try_from(
-                                native_function_index,
-                            )?;
-                            let return_value =
-                                self.call_native(native_function)?;
-                            self.pop_frame()?;
-                            self.memory.push(return_value)?;
-                        }
-                        UnpackedValue::Class(class) => {
-                            let instance = self.memory.create_instance(class);
-                            self.memory.write_stack(
-                                self.fp,
-                                Value::instance(instance),
-                            )?;
-                            if let Some(initializer) =
-                                class.methods.borrow().get("init")
-                            {
-                                let function = &self.executable.functions
-                                    [initializer.function_index];
-                                next_ip = function.ip;
-                            } else {
-                                self.pop_frame()?;
-                                self.memory.push(Value::instance(instance))?;
-                            }
-                        }
-                        UnpackedValue::BoundMethod(bound_method) => {
-                            self.memory.write_stack(
-                                self.fp,
-                                Value::instance(bound_method.receiver),
-                            )?;
-                            let function = &self.executable.functions
-                                [bound_method.method.function_index];
-                            next_ip = function.ip;
-                        }
-                        actual => {
-                            return Err(RuntimeError::ExpectedCallable {
-                                actual,
-                            });
-                        }
-                    }
+                    self.call(Value::nil(), arity, &mut next_ip)?;
                 }
                 Op::CloseFunction { function_index }
                 | Op::CloseFunctionLong { function_index } => {
@@ -431,6 +429,42 @@ impl<'exe> VirtualMachine<'exe> {
                         .fields
                         .borrow_mut()
                         .insert(field.clone(), self.memory.top()?);
+                }
+                Op::Invoke {
+                    constant_index,
+                    arity,
+                }
+                | Op::InvokeLong {
+                    constant_index,
+                    arity,
+                } => {
+                    let target_stack_index =
+                        self.memory.stack_len() - arity - 1;
+                    let target =
+                        self.memory.read_stack(target_stack_index)?.unpack();
+                    let field = self.get_name(constant_index)?;
+
+                    let UnpackedValue::Instance(instance) = target else {
+                        return Err(RuntimeError::ExpectedInstance {
+                            actual: target,
+                        });
+                    };
+
+                    let fields = instance.fields.borrow();
+                    if let Some(value) = fields.get(field) {
+                        self.memory.write_stack(target_stack_index, *value)?;
+                    } else if let Some(method) =
+                        instance.class.methods.borrow().get(field)
+                    {
+                        self.memory.write_stack(
+                            target_stack_index,
+                            Value::closure(*method),
+                        )?;
+                    } else {
+                        return Err(RuntimeError::UndefinedField);
+                    };
+
+                    self.call(Value::instance(instance), arity, &mut next_ip)?;
                 }
             }
             self.ip = next_ip;

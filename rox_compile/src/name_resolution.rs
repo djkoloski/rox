@@ -15,7 +15,7 @@ use rox_vm::{Place, global_names};
 
 use crate::error::CompileError;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Resolution {
     // A local variable
     Local { local_index: usize },
@@ -578,5 +578,7 @@ impl<'ast> Visitor<'ast> for NameResolutionPass<'ast> {
             self.errors
                 .push(CompileError::ReturnInInitializer { span: node.span() });
         }
+
+        visit::visit_return_stmt(self, node);
     }
 }
