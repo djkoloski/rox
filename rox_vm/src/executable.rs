@@ -17,6 +17,7 @@ pub struct FunctionDef {
 pub struct ClassDef {
     pub name: String,
     pub methods: HashMap<String, usize>,
+    pub has_superclass: bool,
 }
 
 pub struct Executable {
@@ -90,7 +91,9 @@ impl Executable {
             | Op::GetField { constant_index }
             | Op::GetFieldLong { constant_index }
             | Op::SetField { constant_index }
-            | Op::SetFieldLong { constant_index } => {
+            | Op::SetFieldLong { constant_index }
+            | Op::GetSuper { constant_index }
+            | Op::GetSuperLong { constant_index } => {
                 let value = &self.chunk.constants()[constant_index];
                 print!(" {value}");
             }
@@ -114,6 +117,14 @@ impl Executable {
                 arity,
             }
             | Op::InvokeLong {
+                constant_index,
+                arity,
+            }
+            | Op::InvokeSuper {
+                constant_index,
+                arity,
+            }
+            | Op::InvokeSuperLong {
                 constant_index,
                 arity,
             } => {

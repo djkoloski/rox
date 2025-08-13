@@ -203,8 +203,15 @@ impl Memory {
         }
     }
 
-    pub fn create_class(&mut self, class_index: usize) -> Handle<Class> {
-        self.create_object(NewClass { class_index })
+    pub fn create_class(
+        &mut self,
+        class_index: usize,
+        superclass: Option<Handle<Class>>,
+    ) -> Handle<Class> {
+        self.create_object(NewClass {
+            class_index,
+            superclass,
+        })
     }
 
     pub fn create_instance(

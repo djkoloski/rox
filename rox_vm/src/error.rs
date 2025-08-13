@@ -45,6 +45,7 @@ pub enum RuntimeError {
     ExpectedFloatOrString { actual: UnpackedValue },
     ExpectedName { actual: f64 },
     ExpectedCallable { actual: UnpackedValue },
+    ExpectedClass { actual: UnpackedValue },
     GlobalAlreadyDefined { name: String, value: UnpackedValue },
     UndefinedGlobal { name: String },
     StackVariableOutOfBounds { stack_index: usize },
@@ -104,6 +105,9 @@ impl fmt::Display for RuntimeError {
             }
             Self::ExpectedCallable { actual } => {
                 write!(f, "expected callable, got {actual:?}")?;
+            }
+            Self::ExpectedClass { actual } => {
+                write!(f, "expected class, got {actual:?}")?;
             }
             Self::GlobalAlreadyDefined { name, value } => {
                 write!(

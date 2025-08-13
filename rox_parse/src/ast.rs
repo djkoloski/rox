@@ -136,6 +136,7 @@ ast! {
 
     #[accept = visit_super_expr]
     pub struct SuperExpr {
+        pub decoration: Decoration<NameDecoration>,
         pub super_: Super,
         pub dot: Dot,
         pub field: Identifier,
@@ -180,10 +181,11 @@ ast! {
 
     #[accept = visit_class_decl_stmt]
     pub struct ClassDeclStmt {
-        pub decoration: Decoration<ClassDecoration>,
+        pub class_decoration: Decoration<ClassDecoration>,
         pub class: Class,
         pub identifier: Identifier,
         pub inheritance: Option<Inheritance>,
+        pub block_decoration: Decoration<BlockDecoration>,
         pub lbrace: LeftBrace,
         #[visit]
         pub methods: Vec<Method>,

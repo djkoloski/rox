@@ -385,10 +385,26 @@ impl<'exe> VirtualMachine<'exe> {
                     self.get_upvalue(upvalue_index)?.write(value);
                 }
                 Op::Class { class_index } | Op::ClassLong { class_index } => {
-                    let class = self.memory.create_class(class_index);
+                    let class_def = &self.executable.classes[class_index];
+
+                    let superclass = if class_def.has_superclass {
+                        let parent = self.memory.top()?.unpack();
+
+                        let UnpackedValue::Class(superclass) = parent else {
+                            return Err(RuntimeError::ExpectedClass {
+                                actual: parent,
+                            });
+                        };
+
+                        Some(superclass)
+                    } else {
+                        None
+                    };
+
+                    let class =
+                        self.memory.create_class(class_index, superclass);
                     self.memory.push(Value::class(class))?;
 
-                    let class_def = &self.executable.classes[class_index];
                     for (name, function_index) in &class_def.methods {
                         class.methods.borrow_mut().insert(
                             name.clone(),
@@ -474,6 +490,76 @@ impl<'exe> VirtualMachine<'exe> {
 
                     self.call(Value::instance(instance), arity, &mut next_ip)?;
                 }
+                Op::GetSuper { constant_index }
+                | Op::GetSuperLong { constant_index } => {
+                    let field = self.get_name(constant_index)?;
+
+                    let superclass = self.memory.pop()?.unpack();
+                    let UnpackedValue::Class(superclass) = superclass else {
+                        return Err(RuntimeError::ExpectedInstance {
+                            actual: superclass,
+                        });
+                    };
+
+                    let value = if let Some(method) =
+                        superclass.methods.borrow().get(field)
+                    {
+                        let instance =
+                            self.memory.read_stack(self.fp)?.unpack();
+                        let UnpackedValue::Instance(instance) = instance else {
+                            return Err(RuntimeError::ExpectedInstance {
+                                actual: instance,
+                            });
+                        };
+
+                        Value::bound_method(
+                            self.memory.create_bound_method(instance, *method),
+                        )
+                    } else {
+                        return Err(RuntimeError::UndefinedField);
+                    };
+
+                    self.memory.push(value)?;
+                }
+                Op::InvokeSuper {
+                    constant_index,
+                    arity,
+                }
+                | Op::InvokeSuperLong {
+                    constant_index,
+                    arity,
+                } => {
+                    let target_stack_index =
+                        self.memory.stack_len() - arity - 1;
+                    let target =
+                        self.memory.read_stack(target_stack_index)?.unpack();
+                    let field = self.get_name(constant_index)?;
+
+                    let UnpackedValue::Class(superclass) = target else {
+                        return Err(RuntimeError::ExpectedInstance {
+                            actual: target,
+                        });
+                    };
+
+                    if let Some(method) = superclass.methods.borrow().get(field)
+                    {
+                        self.memory.write_stack(
+                            target_stack_index,
+                            Value::closure(*method),
+                        )?;
+                    } else {
+                        return Err(RuntimeError::UndefinedField);
+                    };
+
+                    let instance = self.memory.read_stack(self.fp)?.unpack();
+                    let UnpackedValue::Instance(instance) = instance else {
+                        return Err(RuntimeError::ExpectedInstance {
+                            actual: instance,
+                        });
+                    };
+
+                    self.call(Value::instance(instance), arity, &mut next_ip)?;
+                }
             }
             self.ip = next_ip;
         }
@@ -487,7 +573,7 @@ impl<'exe> VirtualMachine<'exe> {
             UnpackedValue::Nil => print!("<nil>"),
             UnpackedValue::False => print!("false"),
             UnpackedValue::True => print!("true"),
-            UnpackedValue::String(s) => print!("\"{s}\""),
+            UnpackedValue::String(s) => print!("{s}"),
             UnpackedValue::Closure(c) => {
                 let function = &self.executable.functions[c.function_index];
                 print!("<fun {}>", function.name)

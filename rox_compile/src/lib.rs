@@ -42,12 +42,13 @@ pub fn compile(
         });
         let pass = AssemblyPass::new(&resolutions, &block_locals, &mut chunk);
         match function_info.kind {
-            FrameKind::Function | FrameKind::Method => {
-                pass.compile_function(function_info.function)
-            }
-            FrameKind::Initializer => {
-                pass.compile_initializer(function_info.function)
-            }
+            FrameKind::Function
+            | FrameKind::Method {
+                is_initializer: false,
+            } => pass.compile_function(function_info.function),
+            FrameKind::Method {
+                is_initializer: true,
+            } => pass.compile_initializer(function_info.function),
         }
     }
 
@@ -56,6 +57,7 @@ pub fn compile(
         classes.push(ClassDef {
             name: class_info.identifier.value.clone(),
             methods: class_info.methods,
+            has_superclass: class_info.has_superclass,
         });
     }
 

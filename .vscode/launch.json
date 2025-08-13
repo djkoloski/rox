@@ -9,7 +9,7 @@
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceFolder}/target/debug/rox.exe",
-            "args": ["examples\\methods.rox"],
+            "args": ["examples\\inherit_methods.rox"],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],

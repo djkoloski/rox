@@ -8,7 +8,8 @@ use rox_parse::{
     NameDecoration, Visit as _,
     ast::{
         AssignExpr, BlockStmt, ClassDeclStmt, FunDeclStmt, Function,
-        ReturnStmt, ThisExpr, VarDeclStmt, VariableExpr, Visitor, visit,
+        ReturnStmt, SuperExpr, ThisExpr, VarDeclStmt, VariableExpr, Visitor,
+        visit,
     },
 };
 use rox_vm::{Place, global_names};
@@ -51,6 +52,7 @@ pub struct FunctionInfo<'ast> {
 pub struct ClassInfo<'ast> {
     pub identifier: &'ast Identifier,
     pub methods: HashMap<String, usize>,
+    pub has_superclass: bool,
 }
 
 pub struct NameResolutionOutput<'ast> {
@@ -65,6 +67,7 @@ pub struct NameResolutionOutput<'ast> {
 enum Name<'ast> {
     Ident(&'ast Identifier),
     This(Span),
+    Super(Span),
 }
 
 impl<'ast> Name<'ast> {
@@ -72,13 +75,14 @@ impl<'ast> Name<'ast> {
         match self {
             Self::Ident(identifier) => &identifier.value,
             Self::This(_) => "this",
+            Self::Super(_) => "super",
         }
     }
 
     fn span(&self) -> Span {
         match self {
             Self::Ident(identifier) => identifier.span(),
-            Self::This(span) => *span,
+            Self::This(span) | Self::Super(span) => *span,
         }
     }
 }
@@ -98,15 +102,15 @@ impl PartialEq for Name<'_> {
 impl Eq for Name<'_> {}
 
 struct Scope<'ast> {
-    block: &'ast BlockStmt,
+    decoration: Decoration<BlockDecoration>,
     name_to_local_decl: HashMap<Name<'ast>, usize>,
     local_decls: Vec<LocalDeclaration>,
 }
 
 impl<'ast> Scope<'ast> {
-    fn new(block: &'ast BlockStmt) -> Self {
+    fn new(decoration: Decoration<BlockDecoration>) -> Self {
         Self {
-            block,
+            decoration,
             name_to_local_decl: HashMap::new(),
             local_decls: Vec::new(),
         }
@@ -161,8 +165,8 @@ impl<'ast> Context<'ast> {
         }
     }
 
-    fn push_scope(&mut self, block: &'ast BlockStmt) {
-        self.scopes.push(Scope::new(block));
+    fn push_scope(&mut self, decoration: Decoration<BlockDecoration>) {
+        self.scopes.push(Scope::new(decoration));
     }
 
     fn pop_scope(&mut self) -> Option<Scope<'ast>> {
@@ -255,16 +259,14 @@ impl<'ast> Frame<'ast> {
 #[derive(Clone, Copy)]
 pub enum FrameKind {
     Function,
-    Method,
-    Initializer,
+    Method { is_initializer: bool },
 }
 
 impl FrameKind {
     fn unused_reserved_names(&self) -> usize {
         match self {
             Self::Function => 1,
-            Self::Method => 0,
-            Self::Initializer => 0,
+            Self::Method { .. } => 0,
         }
     }
 }
@@ -380,8 +382,8 @@ impl<'ast> NameResolutionPass<'ast> {
                         vacant.insert(GlobalResolution::Pending);
                     }
                 }
-                Name::This(span) => {
-                    self.errors.push(CompileError::UndefinedItem { span })
+                Name::This(span) | Name::Super(span) => {
+                    self.errors.push(CompileError::UndefinedItem { span });
                 }
             }
         }
@@ -412,11 +414,11 @@ impl<'ast> NameResolutionPass<'ast> {
         }
     }
 
-    fn push_scope(&mut self, block: &'ast BlockStmt) {
+    fn push_scope(&mut self, decoration: Decoration<BlockDecoration>) {
         if let Some(last_frame) = self.frames.last_mut() {
-            last_frame.context.push_scope(block);
+            last_frame.context.push_scope(decoration);
         } else {
-            self.global_context.push_scope(block);
+            self.global_context.push_scope(decoration);
         }
     }
 
@@ -427,17 +429,20 @@ impl<'ast> NameResolutionPass<'ast> {
             self.global_context.pop_scope().unwrap()
         };
         self.block_locals
-            .insert(scope.block.decoration, scope.local_decls);
+            .insert(scope.decoration, scope.local_decls);
     }
 
     fn push_frame(&mut self, function: &'ast Function, kind: FrameKind) {
         let mut frame = Frame::new(function, kind);
-        frame.context.push_scope(&function.body);
-        if matches!(kind, FrameKind::Method | FrameKind::Initializer)
+
+        frame.context.push_scope(function.body.decoration);
+
+        if matches!(kind, FrameKind::Method { .. })
             && let Err(error) = frame.declare(Name::This(Span::null()))
         {
             self.errors.push(error);
         }
+
         for param in function.params.iter() {
             if let Err(error) = frame.declare(Name::Ident(param)) {
                 self.errors.push(error);
@@ -521,7 +526,7 @@ impl<'ast> Visitor<'ast> for NameResolutionPass<'ast> {
     }
 
     fn visit_block_stmt(&mut self, node: &'ast BlockStmt) {
-        self.push_scope(node);
+        self.push_scope(node.decoration);
 
         visit::visit_block_stmt(self, node);
 
@@ -541,12 +546,20 @@ impl<'ast> Visitor<'ast> for NameResolutionPass<'ast> {
     fn visit_class_decl_stmt(&mut self, node: &'ast ClassDeclStmt) {
         self.declare(Name::Ident(&node.identifier));
 
+        self.push_scope(node.block_decoration);
+
+        if let Some(inheritance) = &node.inheritance {
+            self.declare(Name::Super(Span::null()));
+            self.resolve(
+                Name::Ident(&inheritance.superclass.identifier),
+                inheritance.superclass.decoration,
+            );
+        }
+
         let mut methods = HashMap::new();
         for method in &node.methods {
-            let kind = if method.identifier.value == "init" {
-                FrameKind::Initializer
-            } else {
-                FrameKind::Method
+            let kind = FrameKind::Method {
+                is_initializer: method.identifier.value == "init",
             };
             self.push_frame(&method.function, kind);
 
@@ -560,11 +573,14 @@ impl<'ast> Visitor<'ast> for NameResolutionPass<'ast> {
             );
         }
 
+        self.pop_scope();
+
         self.class_infos.insert(
-            node.decoration,
+            node.class_decoration,
             ClassInfo {
                 identifier: &node.identifier,
                 methods,
+                has_superclass: node.inheritance.is_some(),
             },
         );
     }
@@ -574,11 +590,20 @@ impl<'ast> Visitor<'ast> for NameResolutionPass<'ast> {
     }
 
     fn visit_return_stmt(&mut self, node: &'ast ReturnStmt) {
-        if let Some(FrameKind::Initializer) = self.frame_kind() {
+        if matches!(
+            self.frame_kind(),
+            Some(FrameKind::Method {
+                is_initializer: true
+            })
+        ) {
             self.errors
                 .push(CompileError::ReturnInInitializer { span: node.span() });
         }
 
         visit::visit_return_stmt(self, node);
+    }
+
+    fn visit_super_expr(&mut self, node: &'ast SuperExpr) {
+        self.resolve(Name::Super(node.span()), node.decoration);
     }
 }

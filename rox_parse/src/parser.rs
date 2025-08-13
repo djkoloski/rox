@@ -240,10 +240,11 @@ impl Parser {
         };
 
         Some(ClassDeclStmt {
-            decoration: self.decorator.decorate(),
+            class_decoration: self.decorator.decorate(),
             class,
             identifier,
             inheritance,
+            block_decoration: self.decorator.decorate(),
             lbrace,
             methods,
             rbrace,
@@ -717,7 +718,12 @@ impl Parser {
                         .push(ParseError::ExpectedIdent(self.peek().span()));
                     return None;
                 };
-                Some(Expr::Super(SuperExpr { super_, dot, field }))
+                Some(Expr::Super(SuperExpr {
+                    decoration: self.decorator.decorate(),
+                    super_,
+                    dot,
+                    field,
+                }))
             }
             _ => {
                 self.errors

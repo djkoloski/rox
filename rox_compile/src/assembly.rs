@@ -8,8 +8,8 @@ use rox_parse::{
         AssignExpr, BinaryExpr, BinaryOperator, BlockStmt, CallExpr,
         ClassDeclStmt, Expr, ExprStmt, FunDeclStmt, Function, GetExpr, IfStmt,
         Literal, LiteralExpr, PrintStmt, Program, ReturnStmt, SetExpr,
-        ThisExpr, UnaryExpr, UnaryOperator, VarDeclStmt, VariableExpr, Visitor,
-        WhileStmt, visit,
+        SuperExpr, ThisExpr, UnaryExpr, UnaryOperator, VarDeclStmt,
+        VariableExpr, Visitor, WhileStmt, visit,
     },
 };
 use rox_vm::{Chunk, Constant, Op};
@@ -349,30 +349,52 @@ impl<'ast> Visitor<'ast> for AssemblyPass<'ast> {
     fn visit_call_expr(&mut self, node: &'ast CallExpr) {
         self.chunk.encode(Op::PushFrame, node.span());
 
-        if let Expr::Get(get_expr) = &*node.target {
-            get_expr.target.accept(self);
-            node.arguments.accept(self);
+        match &*node.target {
+            Expr::Get(get_expr) => {
+                get_expr.target.accept(self);
+                node.arguments.accept(self);
 
-            let field_name = self.add_string(get_expr.field.value.clone());
-            self.chunk.encode(
-                Op::invoke(field_name, node.arguments.len()),
-                node.span(),
-            );
-        } else {
-            visit::visit_call_expr(self, node);
+                let field_name = self.add_string(get_expr.field.value.clone());
+                self.chunk.encode(
+                    Op::invoke(field_name, node.arguments.len()),
+                    node.span(),
+                );
+            }
+            Expr::Super(super_expr) => {
+                self.resolve(super_expr.decoration, node.span(), None);
+                node.arguments.accept(self);
 
-            self.chunk.encode(
-                Op::Call {
-                    arity: node.arguments.len(),
-                },
-                node.span(),
-            );
+                let field_name =
+                    self.add_string(super_expr.field.value.clone());
+                self.chunk.encode(
+                    Op::invoke_super(field_name, node.arguments.len()),
+                    node.span(),
+                );
+            }
+            _ => {
+                visit::visit_call_expr(self, node);
+
+                self.chunk.encode(
+                    Op::Call {
+                        arity: node.arguments.len(),
+                    },
+                    node.span(),
+                );
+            }
         }
     }
 
     fn visit_class_decl_stmt(&mut self, node: &'ast ClassDeclStmt) {
+        if let Some(inheritance) = &node.inheritance {
+            self.resolve(
+                inheritance.superclass.decoration,
+                inheritance.superclass.span(),
+                Some(&inheritance.superclass.identifier),
+            );
+        }
+
         self.chunk
-            .encode(Op::class(node.decoration.index()), node.span());
+            .encode(Op::class(node.class_decoration.index()), node.span());
         self.define_if_global(&node.identifier);
     }
 
@@ -395,5 +417,13 @@ impl<'ast> Visitor<'ast> for AssemblyPass<'ast> {
 
     fn visit_this_expr(&mut self, node: &'ast ThisExpr) {
         self.resolve(node.decoration, node.span(), None);
+    }
+
+    fn visit_super_expr(&mut self, node: &'ast SuperExpr) {
+        self.resolve(node.decoration, node.span(), None);
+
+        let field_name = self.add_string(node.field.value.clone());
+        self.chunk
+            .encode(Op::get_super(field_name), node.field.span());
     }
 }

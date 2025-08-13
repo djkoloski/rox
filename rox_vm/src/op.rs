@@ -243,6 +243,26 @@ define_ops! {
             #[codec(U8)]
             arity: usize,
         },
+        GetSuper {
+            #[codec(U8)]
+            constant_index: usize,
+        },
+        GetSuperLong {
+            #[codec(U24)]
+            constant_index: usize,
+        },
+        InvokeSuper {
+            #[codec(U8)]
+            constant_index: usize,
+            #[codec(U8)]
+            arity: usize,
+        },
+        InvokeSuperLong {
+            #[codec(U24)]
+            constant_index: usize,
+            #[codec(U8)]
+            arity: usize,
+        },
     }
 }
 
@@ -288,4 +308,6 @@ long_ops! {
     get_field: constant_index => GetField, GetFieldLong;
     set_field: constant_index => SetField, SetFieldLong;
     invoke: constant_index, arity: usize => Invoke, InvokeLong;
+    get_super: constant_index => GetSuper, GetSuperLong;
+    invoke_super: constant_index, arity: usize => InvokeSuper, InvokeSuperLong;
 }

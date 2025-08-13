@@ -36,6 +36,10 @@ impl ObjectKind for Class {
         for method in self.methods.borrow().values() {
             frontier.push(Handle::erase(*method));
         }
+
+        if let Some(superclass) = self.superclass {
+            frontier.push(Handle::erase(superclass));
+        }
     }
 }
 
